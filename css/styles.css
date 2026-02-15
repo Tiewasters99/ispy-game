@@ -206,3 +206,63 @@ body {
     background: rgba(231, 76, 60, 0.2);
     color: #e74c3c;
 }
+
+/* Hidden utility class */
+.hidden {
+    display: none !important;
+}
+
+/* Answer actions (Learn More / Skip) */
+.answer-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin-top: 20px;
+}
+
+#learn-more-btn {
+    background: #0f3460;
+    border: none;
+    color: #ffffff;
+    padding: 15px 25px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 1rem;
+}
+
+#skip-btn {
+    background: transparent;
+    border: 1px solid #a0a0a0;
+    color: #a0a0a0;
+    padding: 15px 25px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 1rem;
+}
+
+/* Learn More container */
+.learn-more-container {
+    background: rgba(255, 255, 255, 0.1);
+    padding: 20px;
+    border-radius: 15px;
+    margin-top: 20px;
+}
+
+#learn-more-text {
+    font-size: 1rem;
+    line-height: 1.7;
+    margin-bottom: 20px;
+    color: #e0e0e0;
+}
+
+#continue-btn {
+    display: block;
+    width: 100%;
+    background: #e94560;
+    border: none;
+    color: #ffffff;
+    padding: 15px 25px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 1rem;
+}
