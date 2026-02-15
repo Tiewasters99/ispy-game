@@ -287,13 +287,7 @@ function submitGuess() {
 
     if (!guess) return;
 
-    // Check for exact match or close enough (e.g., "Martin Luther King" without "Jr")
-    const guessWords = guess.split(/\s+/);
-    const answerWords = answer.split(/\s+/);
-    const matchingWords = guessWords.filter(word => answerWords.includes(word));
-    const isCorrect = guess === answer || matchingWords.length >= Math.min(2, answerWords.length);
-
-    if (isCorrect) {
+    if (guess === answer) {
         // Correct!
         gameState.score++;
         resultMessage.textContent = `Correct! The answer was ${gameState.currentClue.answer}`;
