@@ -285,18 +285,12 @@ async function startNewRound(forceLetter = null) {
     resultMessage.textContent = '';
     resultMessage.className = 'result-message';
 
-    // Speak the letter
-    speak(`I spy with my little eye, something that begins with ${letter}`);
-
     // Try to fetch dynamic clue from Claude API
     const clue = await fetchClueFromAPI(letter);
 
     if (clue) {
         gameState.currentClue = clue;
         currentHintEl.textContent = clue.hints[0];
-        if (clue.locationRelevance) {
-            speak(clue.hints[0]);
-        }
     } else {
         // Fall back to hardcoded clues
         const categoryClues = clueDatabase[gameState.category];
@@ -312,6 +306,9 @@ async function startNewRound(forceLetter = null) {
         gameState.currentClue = categoryClues[letter];
         currentHintEl.textContent = gameState.currentClue.hints[0];
     }
+
+    // Speak AFTER we have the final letter (in case it changed during fallback)
+    speak(`I spy with my little eye, something that begins with ${gameState.currentLetter}`);
 }
 
 async function fetchClueFromAPI(letter) {
