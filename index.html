@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>I Spy Road Trip</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#2c3e50">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+</head>
+<body>
+    <!-- Setup Screen -->
+    <div id="setup-screen" class="screen active">
+        <h1>I Spy Road Trip</h1>
+        <div class="setup-form">
+            <label for="player-count">Number of Players</label>
+            <select id="player-count">
+                <option value="2">2 Players</option>
+                <option value="3">3 Players</option>
+                <option value="4">4 Players</option>
+                <option value="5" selected>5 Players</option>
+                <option value="6">6 Players</option>
+            </select>
+
+            <label>Select Category</label>
+            <div class="category-buttons">
+                <button class="category-btn" data-category="civil-rights">Civil Rights</button>
+                <button class="category-btn" data-category="music">Music Industry</button>
+                <button class="category-btn" data-category="hollywood">Hollywood</button>
+                <button class="category-btn" data-category="history">American History</button>
+                <button class="category-btn" data-category="science">Science</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game Screen -->
+    <div id="game-screen" class="screen">
+        <div class="game-header">
+            <span id="category-display">Civil Rights</span>
+            <button id="end-game-btn">End Game</button>
+        </div>
+
+        <div class="clue-container">
+            <p class="clue-intro">I spy with my little eye something that begins with...</p>
+            <div id="current-letter" class="big-letter">M</div>
+        </div>
+
+        <div class="hint-container">
+            <p id="current-hint">Loading clue...</p>
+            <button id="next-hint-btn">Another Hint</button>
+        </div>
+
+        <div class="guess-container">
+            <input type="text" id="guess-input" placeholder="Enter your guess...">
+            <button id="submit-guess-btn">Submit Guess</button>
+        </div>
+
+        <div id="result-message" class="result-message"></div>
+    </div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>

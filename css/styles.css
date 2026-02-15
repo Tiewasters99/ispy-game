@@ -1,0 +1,193 @@
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    color: #ffffff;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.screen {
+    display: none;
+    width: 100%;
+    max-width: 500px;
+    padding: 20px;
+}
+
+.screen.active {
+    display: block;
+}
+
+/* Setup Screen */
+#setup-screen h1 {
+    text-align: center;
+    font-size: 2rem;
+    margin-bottom: 30px;
+    color: #e94560;
+}
+
+.setup-form {
+    background: rgba(255, 255, 255, 0.1);
+    padding: 25px;
+    border-radius: 15px;
+}
+
+.setup-form label {
+    display: block;
+    margin-bottom: 10px;
+    font-weight: 600;
+    color: #a0a0a0;
+}
+
+.setup-form select {
+    width: 100%;
+    padding: 15px;
+    font-size: 1rem;
+    border: none;
+    border-radius: 10px;
+    background: #0f3460;
+    color: #ffffff;
+    margin-bottom: 25px;
+}
+
+.category-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.category-btn {
+    padding: 18px;
+    font-size: 1.1rem;
+    border: 2px solid #e94560;
+    border-radius: 10px;
+    background: transparent;
+    color: #ffffff;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.category-btn:hover {
+    background: #e94560;
+    transform: scale(1.02);
+}
+
+/* Game Screen */
+.game-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+#category-display {
+    background: #e94560;
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 0.9rem;
+}
+
+#end-game-btn {
+    background: transparent;
+    border: 1px solid #a0a0a0;
+    color: #a0a0a0;
+    padding: 8px 16px;
+    border-radius: 20px;
+    cursor: pointer;
+}
+
+.clue-container {
+    text-align: center;
+    margin: 30px 0;
+}
+
+.clue-intro {
+    font-size: 1.2rem;
+    color: #a0a0a0;
+    margin-bottom: 15px;
+}
+
+.big-letter {
+    font-size: 6rem;
+    font-weight: 800;
+    color: #e94560;
+    text-shadow: 0 0 30px rgba(233, 69, 96, 0.5);
+}
+
+.hint-container {
+    background: rgba(255, 255, 255, 0.1);
+    padding: 20px;
+    border-radius: 15px;
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+#current-hint {
+    font-size: 1.1rem;
+    line-height: 1.6;
+    margin-bottom: 15px;
+}
+
+#next-hint-btn {
+    background: #0f3460;
+    border: none;
+    color: #ffffff;
+    padding: 10px 20px;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.guess-container {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+#guess-input {
+    flex: 1;
+    padding: 15px;
+    font-size: 1rem;
+    border: none;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+}
+
+#guess-input::placeholder {
+    color: #a0a0a0;
+}
+
+#submit-guess-btn {
+    padding: 15px 25px;
+    font-size: 1rem;
+    border: none;
+    border-radius: 10px;
+    background: #e94560;
+    color: #ffffff;
+    cursor: pointer;
+}
+
+.result-message {
+    text-align: center;
+    padding: 15px;
+    border-radius: 10px;
+    font-weight: 600;
+    min-height: 50px;
+}
+
+.result-message.correct {
+    background: rgba(46, 204, 113, 0.2);
+    color: #2ecc71;
+}
+
+.result-message.incorrect {
+    background: rgba(231, 76, 60, 0.2);
+    color: #e74c3c;
+}
