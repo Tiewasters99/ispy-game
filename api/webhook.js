@@ -1,6 +1,7 @@
 // Stripe Webhook Handler
 // Processes successful payments and adds credits to user accounts
 
+import Stripe from 'stripe';
 import { createClient } from '@supabase/supabase-js';
 
 export const config = {
@@ -22,7 +23,7 @@ export default async function handler(req, res) {
         return res.status(405).json({ error: 'Method not allowed' });
     }
 
-    const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
     const supabase = createClient(
         process.env.SUPABASE_URL,
         process.env.SUPABASE_SERVICE_KEY

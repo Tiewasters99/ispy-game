@@ -149,7 +149,9 @@ function showSubscriptionOffer() {
 
 async function purchaseCredits(type, amount = 0) {
     const user = supabase.auth.getUser();
-    if (!user) {
+    console.log('Purchase attempt:', { type, amount, user });
+
+    if (!user || !user.id) {
         alert('Please sign in first');
         return;
     }
@@ -166,16 +168,21 @@ async function purchaseCredits(type, amount = 0) {
         });
 
         const data = await response.json();
+        console.log('Checkout response:', data);
+
         if (data.url) {
             window.location.href = data.url;
         } else {
-            alert('Failed to create checkout session');
+            alert('Failed to create checkout: ' + (data.error || 'Unknown error'));
         }
     } catch (error) {
         console.error('Purchase error:', error);
-        alert('Payment error. Please try again.');
+        alert('Payment error: ' + error.message);
     }
 }
+
+// Make purchaseCredits available globally for onclick handlers
+window.purchaseCredits = purchaseCredits;
 
 // Initialize auth on page load
 document.addEventListener('DOMContentLoaded', () => {

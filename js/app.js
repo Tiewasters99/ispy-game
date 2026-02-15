@@ -480,11 +480,20 @@ function endGame() {
     // Reset UI state
     answerActions.classList.add('hidden');
     learnMoreContainer.classList.add('hidden');
+    const outOfCredits = document.getElementById('out-of-credits');
+    if (outOfCredits) outOfCredits.classList.add('hidden');
     document.querySelector('.guess-container').classList.remove('hidden');
     document.querySelector('.hint-container').classList.remove('hidden');
     gameScreen.classList.remove('active');
     setupScreen.classList.add('active');
+    // Update credits display on setup screen
+    if (typeof updateCreditsDisplay === 'function') {
+        updateCreditsDisplay();
+    }
 }
+
+// Make endGame globally accessible for onclick handlers
+window.endGame = endGame;
 
 // GPS/Location Functions
 function startLocationTracking() {

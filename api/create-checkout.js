@@ -1,12 +1,14 @@
 // Stripe Checkout Session Creator
 // Creates a checkout session for credit purchases
 
+import Stripe from 'stripe';
+
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method not allowed' });
     }
 
-    const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
     const { amount, userId, type } = req.body;
 
     // type: 'starter' ($10), 'credits' (custom amount), 'subscription' ($9.99/month)
@@ -19,8 +21,8 @@ export default async function handler(req, res) {
         let sessionConfig = {
             payment_method_types: ['card'],
             client_reference_id: userId,
-            success_url: `${process.env.NEXT_PUBLIC_APP_URL || 'https://ispy-game-six.vercel.app'}/?payment=success`,
-            cancel_url: `${process.env.NEXT_PUBLIC_APP_URL || 'https://ispy-game-six.vercel.app'}/?payment=cancelled`,
+            success_url: `https://ispy-game-six.vercel.app/?payment=success`,
+            cancel_url: `https://ispy-game-six.vercel.app/?payment=cancelled`,
             metadata: {
                 userId: userId,
                 type: type
@@ -63,7 +65,7 @@ export default async function handler(req, res) {
                 },
                 quantity: 1
             }];
-            sessionConfig.metadata.credits = credits;
+            sessionConfig.metadata.credits = credits.toString();
         }
 
         const session = await stripe.checkout.sessions.create(sessionConfig);
@@ -71,6 +73,6 @@ export default async function handler(req, res) {
         return res.status(200).json({ url: session.url });
     } catch (error) {
         console.error('Stripe error:', error);
-        return res.status(500).json({ error: 'Failed to create checkout session' });
+        return res.status(500).json({ error: 'Failed to create checkout session', details: error.message });
     }
 }
