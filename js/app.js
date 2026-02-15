@@ -264,31 +264,84 @@ function getCategoryDisplayName(category) {
     return names[category] || category;
 }
 
-function startNewRound(forceLetter = null) {
-    const categoryClues = clueDatabase[gameState.category];
-    const availableLetters = Object.keys(categoryClues);
-
-    // Pick a letter (use forced letter or random)
+async function startNewRound(forceLetter = null) {
+    // Pick a letter
     let letter;
-    if (forceLetter && categoryClues[forceLetter.toUpperCase()]) {
+    if (forceLetter) {
         letter = forceLetter.toUpperCase();
     } else {
-        letter = availableLetters[Math.floor(Math.random() * availableLetters.length)];
+        // Random letter A-Z
+        const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+        letter = letters[Math.floor(Math.random() * letters.length)];
     }
 
     gameState.currentLetter = letter;
-    gameState.currentClue = categoryClues[letter];
     gameState.hintIndex = 0;
 
-    // Update UI
+    // Update UI to show loading state
     currentLetterEl.textContent = letter;
-    currentHintEl.textContent = gameState.currentClue.hints[0];
+    currentHintEl.textContent = 'Generating clue...';
     guessInput.value = '';
     resultMessage.textContent = '';
     resultMessage.className = 'result-message';
 
-    // Speak the clue (Phase 2 will enhance this)
+    // Speak the letter
     speak(`I spy with my little eye, something that begins with ${letter}`);
+
+    // Try to fetch dynamic clue from Claude API
+    const clue = await fetchClueFromAPI(letter);
+
+    if (clue) {
+        gameState.currentClue = clue;
+        currentHintEl.textContent = clue.hints[0];
+        if (clue.locationRelevance) {
+            speak(clue.hints[0]);
+        }
+    } else {
+        // Fall back to hardcoded clues
+        const categoryClues = clueDatabase[gameState.category];
+        const availableLetters = Object.keys(categoryClues);
+
+        // If we don't have a hardcoded clue for this letter, pick a different one
+        if (!categoryClues[letter]) {
+            letter = availableLetters[Math.floor(Math.random() * availableLetters.length)];
+            gameState.currentLetter = letter;
+            currentLetterEl.textContent = letter;
+        }
+
+        gameState.currentClue = categoryClues[letter];
+        currentHintEl.textContent = gameState.currentClue.hints[0];
+    }
+}
+
+async function fetchClueFromAPI(letter) {
+    try {
+        const response = await fetch('/api/clue', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                category: getCategoryDisplayName(gameState.category),
+                letter: letter,
+                latitude: gameState.location.latitude,
+                longitude: gameState.location.longitude,
+                city: gameState.location.city,
+                region: gameState.location.region
+            })
+        });
+
+        if (!response.ok) {
+            console.warn('API returned error, falling back to hardcoded clues');
+            return null;
+        }
+
+        const clue = await response.json();
+        return clue;
+    } catch (error) {
+        console.warn('Failed to fetch clue from API:', error);
+        return null;
+    }
 }
 
 function showNextHint() {
