@@ -198,6 +198,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Next hint listener
     document.getElementById('next-hint-btn').addEventListener('click', showNextHint);
 
+    // Give up listener
+    document.getElementById('give-up-btn').addEventListener('click', giveUp);
+
     // End game listener
     document.getElementById('end-game-btn').addEventListener('click', endGame);
 });
@@ -261,6 +264,21 @@ function showNextHint() {
     } else {
         currentHintEl.textContent = "No more hints! Make your best guess.";
     }
+}
+
+function giveUp() {
+    const answer = gameState.currentClue.answer;
+    resultMessage.textContent = `The answer was: ${answer}`;
+    resultMessage.className = 'result-message';
+    speak(`The answer was ${answer}`);
+
+    // Pick a letter from the answer for the next round
+    const nextLetter = pickLetterFromAnswer(answer);
+
+    // Start next round after a delay
+    setTimeout(() => {
+        startNewRound(nextLetter);
+    }, 3000);
 }
 
 function submitGuess() {

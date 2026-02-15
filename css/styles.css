@@ -135,10 +135,25 @@ body {
     margin-bottom: 15px;
 }
 
+.hint-buttons {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+}
+
 #next-hint-btn {
     background: #0f3460;
     border: none;
     color: #ffffff;
+    padding: 10px 20px;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+#give-up-btn {
+    background: transparent;
+    border: 1px solid #e94560;
+    color: #e94560;
     padding: 10px 20px;
     border-radius: 8px;
     cursor: pointer;
