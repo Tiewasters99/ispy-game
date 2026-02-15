@@ -255,6 +255,26 @@ body {
     color: #e0e0e0;
 }
 
+.learn-more-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+#hungry-for-more-btn {
+    display: block;
+    width: 100%;
+    background: #0f3460;
+    border: none;
+    color: #ffffff;
+    padding: 15px 25px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 1rem;
+    text-align: center;
+    text-decoration: none;
+}
+
 #continue-btn {
     display: block;
     width: 100%;

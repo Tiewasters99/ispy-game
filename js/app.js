@@ -350,6 +350,13 @@ function showAnswerActions() {
 
 function showLearnMore() {
     learnMoreText.textContent = gameState.currentClue.essay;
+
+    // Set up Claude link with context about the current answer
+    const answer = gameState.currentClue.answer;
+    const category = getCategoryDisplayName(gameState.category);
+    const prompt = encodeURIComponent(`Tell me more about ${answer} and their significance in ${category} history.`);
+    document.getElementById('hungry-for-more-btn').href = `https://claude.ai/new?q=${prompt}`;
+
     answerActions.classList.add('hidden');
     learnMoreContainer.classList.remove('hidden');
 }
