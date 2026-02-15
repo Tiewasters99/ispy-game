@@ -2,6 +2,7 @@
   "name": "ispy-game",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "dependencies": {
     "stripe": "^14.0.0",
     "@supabase/supabase-js": "^2.39.0"
