@@ -313,6 +313,9 @@ async function startNewRound(forceLetter = null) {
 
 async function fetchClueFromAPI(letter) {
     try {
+        // Get user ID from auth
+        const user = typeof supabase !== 'undefined' ? supabase.auth.getUser() : null;
+
         const response = await fetch('/api/clue', {
             method: 'POST',
             headers: {
@@ -324,9 +327,17 @@ async function fetchClueFromAPI(letter) {
                 latitude: gameState.location.latitude,
                 longitude: gameState.location.longitude,
                 city: gameState.location.city,
-                region: gameState.location.region
+                region: gameState.location.region,
+                userId: user?.id || null
             })
         });
+
+        // Handle insufficient credits
+        if (response.status === 402) {
+            const errorData = await response.json();
+            showOutOfCredits();
+            return null;
+        }
 
         if (!response.ok) {
             console.warn('API returned error, falling back to hardcoded clues');
@@ -334,10 +345,37 @@ async function fetchClueFromAPI(letter) {
         }
 
         const clue = await response.json();
+
+        // Update credits display
+        if (clue.remainingCredits !== null && clue.remainingCredits !== undefined) {
+            updateGameCreditsDisplay(clue.remainingCredits);
+        }
+
         return clue;
     } catch (error) {
         console.warn('Failed to fetch clue from API:', error);
         return null;
+    }
+}
+
+function showOutOfCredits() {
+    const modal = document.getElementById('out-of-credits');
+    if (modal) {
+        modal.classList.remove('hidden');
+    }
+}
+
+function hideOutOfCredits() {
+    const modal = document.getElementById('out-of-credits');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+}
+
+function updateGameCreditsDisplay(credits) {
+    const display = document.getElementById('game-credits-display');
+    if (display) {
+        display.textContent = credits === 'unlimited' ? 'Unlimited' : credits;
     }
 }
 

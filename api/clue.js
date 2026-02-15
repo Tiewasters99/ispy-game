@@ -1,13 +1,15 @@
 // Vercel Serverless Function - Claude API Integration
 // This keeps the API key secure on the server side
 
+import { createClient } from '@supabase/supabase-js';
+
 export default async function handler(req, res) {
     // Only allow POST requests
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method not allowed' });
     }
 
-    const { category, letter, latitude, longitude, city, region } = req.body;
+    const { category, letter, latitude, longitude, city, region, userId, token } = req.body;
 
     if (!category || !letter) {
         return res.status(400).json({ error: 'Missing required fields' });
@@ -16,6 +18,45 @@ export default async function handler(req, res) {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
         return res.status(500).json({ error: 'API key not configured' });
+    }
+
+    // Initialize Supabase
+    const supabase = createClient(
+        process.env.SUPABASE_URL,
+        process.env.SUPABASE_SERVICE_KEY
+    );
+
+    // Check user credits if userId provided
+    if (userId) {
+        const { data: user, error } = await supabase
+            .from('users')
+            .select('credits, is_subscriber')
+            .eq('id', userId)
+            .single();
+
+        if (error || !user) {
+            return res.status(401).json({ error: 'User not found' });
+        }
+
+        // Subscribers have unlimited access
+        if (!user.is_subscriber) {
+            // Each clue costs 10 credits (roughly $0.10 worth)
+            const clueCost = 10;
+
+            if (user.credits < clueCost) {
+                return res.status(402).json({
+                    error: 'Insufficient credits',
+                    credits: user.credits,
+                    required: clueCost
+                });
+            }
+
+            // Deduct credits
+            await supabase
+                .from('users')
+                .update({ credits: user.credits - clueCost })
+                .eq('id', userId);
+        }
     }
 
     // Build location context
@@ -85,7 +126,22 @@ Only respond with valid JSON, no other text.`;
         // Parse the JSON response from Claude
         const clueData = JSON.parse(content);
 
-        return res.status(200).json(clueData);
+        // Get updated credit balance
+        let remainingCredits = null;
+        if (userId) {
+            const { data: updatedUser } = await supabase
+                .from('users')
+                .select('credits, is_subscriber')
+                .eq('id', userId)
+                .single();
+
+            remainingCredits = updatedUser?.is_subscriber ? 'unlimited' : updatedUser?.credits;
+        }
+
+        return res.status(200).json({
+            ...clueData,
+            remainingCredits
+        });
     } catch (error) {
         console.error('Error:', error);
         return res.status(500).json({ error: 'Failed to generate clue' });

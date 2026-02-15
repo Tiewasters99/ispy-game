@@ -11,10 +11,58 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 </head>
 <body>
-    <!-- Setup Screen -->
-    <div id="setup-screen" class="screen active">
+    <!-- Auth Screen -->
+    <div id="auth-screen" class="screen">
         <h1>I Spy Road Trip</h1>
+        <div class="auth-form">
+            <form id="auth-form">
+                <input type="email" id="auth-email" placeholder="Email" required>
+                <input type="password" id="auth-password" placeholder="Password" required>
+                <p id="auth-error" class="auth-error"></p>
+                <div class="auth-buttons">
+                    <button type="submit" id="sign-in-btn">Sign In</button>
+                    <button type="button" id="sign-up-btn">Sign Up</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Setup Screen -->
+    <div id="setup-screen" class="screen">
+        <div class="setup-header">
+            <h1>I Spy Road Trip</h1>
+            <div class="user-info">
+                <span id="credits-display">0 credits</span>
+                <button id="sign-out-btn" class="sign-out-btn">Sign Out</button>
+            </div>
+        </div>
+
+        <!-- Subscription Offer (shows when approaching $29.99) -->
+        <div id="subscription-offer" class="subscription-offer hidden">
+            <p>You've spent almost $30! Switch to unlimited for $9.99/month?</p>
+            <button onclick="purchaseCredits('subscription')">Go Unlimited</button>
+        </div>
+
         <div class="setup-form">
+            <!-- Credit Purchase Section -->
+            <div class="credits-section">
+                <label>Get Credits</label>
+                <div class="credit-buttons">
+                    <button onclick="purchaseCredits('starter')" class="credit-btn starter">
+                        Starter Pack - $10
+                        <span>1000 credits</span>
+                    </button>
+                    <div class="custom-credits">
+                        <input type="number" id="custom-amount" min="1" max="100" value="5" placeholder="$">
+                        <button onclick="purchaseCredits('credits', parseInt(document.getElementById('custom-amount').value))" class="credit-btn">
+                            Add Credits
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <hr class="divider">
+
             <label for="player-count">Number of Players</label>
             <select id="player-count">
                 <option value="2">2 Players</option>
@@ -40,6 +88,7 @@
         <div class="game-header">
             <span id="category-display">Civil Rights</span>
             <span id="location-display" class="location-display">Getting location...</span>
+            <span id="game-credits-display" class="credits-badge">0</span>
             <button id="end-game-btn">End Game</button>
         </div>
 
@@ -75,8 +124,19 @@
                 <button id="continue-btn">Continue</button>
             </div>
         </div>
+
+        <!-- Out of Credits Modal -->
+        <div id="out-of-credits" class="modal hidden">
+            <div class="modal-content">
+                <h2>Out of Credits!</h2>
+                <p>You need more credits to continue playing.</p>
+                <button onclick="purchaseCredits('credits', 5)">Add $5 Credits</button>
+                <button onclick="endGame()">End Game</button>
+            </div>
+        </div>
     </div>
 
+    <script src="js/auth.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>
