@@ -173,7 +173,8 @@ async function purchaseCredits(type, amount = 0) {
         if (data.url) {
             window.location.href = data.url;
         } else {
-            alert('Failed to create checkout: ' + (data.error || 'Unknown error'));
+            alert('Failed to create checkout: ' + (data.error || 'Unknown error') + (data.details ? ' - ' + data.details : ''));
+            console.error('Checkout error details:', data);
         }
     } catch (error) {
         console.error('Purchase error:', error);
