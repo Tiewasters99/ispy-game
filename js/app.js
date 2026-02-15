@@ -181,7 +181,15 @@ let gameState = {
     currentLetter: null,
     currentClue: null,
     hintIndex: 0,
-    score: 0
+    score: 0,
+    location: {
+        latitude: null,
+        longitude: null,
+        city: null,
+        region: null,
+        watching: false,
+        watchId: null
+    }
 };
 
 // DOM Elements
@@ -232,6 +240,9 @@ document.addEventListener('DOMContentLoaded', () => {
 function startGame(category) {
     gameState.category = category;
     gameState.score = 0;
+
+    // Start tracking location
+    startLocationTracking();
 
     // Update UI
     setupScreen.classList.remove('active');
@@ -377,6 +388,7 @@ function proceedToNextRound() {
 
 function endGame() {
     speechSynthesis.cancel();
+    stopLocationTracking();
     // Reset UI state
     answerActions.classList.add('hidden');
     learnMoreContainer.classList.add('hidden');
@@ -384,4 +396,92 @@ function endGame() {
     document.querySelector('.hint-container').classList.remove('hidden');
     gameScreen.classList.remove('active');
     setupScreen.classList.add('active');
+}
+
+// GPS/Location Functions
+function startLocationTracking() {
+    if (!navigator.geolocation) {
+        updateLocationDisplay('GPS not supported');
+        return;
+    }
+
+    updateLocationDisplay('Getting location...');
+
+    // Get initial position
+    navigator.geolocation.getCurrentPosition(
+        handleLocationSuccess,
+        handleLocationError,
+        { enableHighAccuracy: true, timeout: 10000 }
+    );
+
+    // Watch for position changes (for moving car)
+    gameState.location.watchId = navigator.geolocation.watchPosition(
+        handleLocationSuccess,
+        handleLocationError,
+        { enableHighAccuracy: true, maximumAge: 30000, timeout: 30000 }
+    );
+    gameState.location.watching = true;
+}
+
+function stopLocationTracking() {
+    if (gameState.location.watchId !== null) {
+        navigator.geolocation.clearWatch(gameState.location.watchId);
+        gameState.location.watchId = null;
+        gameState.location.watching = false;
+    }
+}
+
+function handleLocationSuccess(position) {
+    gameState.location.latitude = position.coords.latitude;
+    gameState.location.longitude = position.coords.longitude;
+
+    // Reverse geocode to get place name
+    reverseGeocode(position.coords.latitude, position.coords.longitude);
+}
+
+function handleLocationError(error) {
+    let message = 'Location unavailable';
+    switch (error.code) {
+        case error.PERMISSION_DENIED:
+            message = 'Location permission denied';
+            break;
+        case error.POSITION_UNAVAILABLE:
+            message = 'Location unavailable';
+            break;
+        case error.TIMEOUT:
+            message = 'Location request timed out';
+            break;
+    }
+    updateLocationDisplay(message);
+}
+
+async function reverseGeocode(lat, lon) {
+    try {
+        // Using free Nominatim API (OpenStreetMap)
+        const response = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`,
+            { headers: { 'User-Agent': 'ISpyRoadTrip/1.0' } }
+        );
+        const data = await response.json();
+
+        if (data.address) {
+            const city = data.address.city || data.address.town || data.address.village || data.address.county || '';
+            const state = data.address.state || '';
+            gameState.location.city = city;
+            gameState.location.region = state;
+
+            const locationText = city && state ? `${city}, ${state}` : city || state || 'Unknown location';
+            updateLocationDisplay(locationText);
+        }
+    } catch (error) {
+        // Fallback to coordinates display
+        updateLocationDisplay(`${lat.toFixed(2)}°, ${lon.toFixed(2)}°`);
+    }
+}
+
+function updateLocationDisplay(text) {
+    const locationEl = document.getElementById('location-display');
+    if (locationEl) {
+        locationEl.textContent = text;
+    }
 }

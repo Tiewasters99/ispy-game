@@ -84,7 +84,9 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 10px;
     margin-bottom: 20px;
+    flex-wrap: wrap;
 }
 
 #category-display {
@@ -92,6 +94,18 @@ body {
     padding: 8px 16px;
     border-radius: 20px;
     font-size: 0.9rem;
+}
+
+.location-display {
+    background: rgba(255, 255, 255, 0.1);
+    padding: 6px 12px;
+    border-radius: 15px;
+    font-size: 0.8rem;
+    color: #a0a0a0;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 #end-game-btn {
