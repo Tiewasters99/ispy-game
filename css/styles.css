@@ -650,7 +650,7 @@ body {
 }
 
 /* Responsive */
-@media (max-width: 400px) {
+@media (max-width: 500px) {
     .voice-input-area {
         flex-wrap: wrap;
     }
@@ -658,6 +658,19 @@ body {
     .mic-btn {
         order: -1;
         width: 100%;
+        padding: 18px;
+        font-size: 1.1rem;
+        border-radius: 12px;
+    }
+
+    .send-btn {
+        padding: 18px 28px;
+        font-size: 1.1rem;
+    }
+
+    #text-input {
+        font-size: 1.1rem;
+        padding: 16px;
     }
 
     .big-letter {

@@ -445,6 +445,16 @@ function updateGameCreditsDisplay(credits) {
 }
 
 function toggleMicForGuess() {
+    // If there's text in the input (e.g. from phone dictation), send it immediately
+    const textInput = document.getElementById('text-input');
+    if (textInput && textInput.value.trim()) {
+        const text = textInput.value.trim();
+        textInput.value = '';
+        sendToGamemaster(text);
+        return;
+    }
+
+    // Otherwise toggle listening
     if (AudioManager.isListening) {
         AudioManager.stopListening();
     } else {
