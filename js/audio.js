@@ -12,6 +12,7 @@ const AudioManager = (() => {
     let isListening = false;
     let isSpeaking = false;
     let essayAudio = null; // <audio> element for ElevenLabs playback
+    let speechAudio = null; // persistent <audio> element for TTS (unlocked on user gesture)
     let isEssayPlaying = false;
     let isPaused = false; // true while recognition is paused for TTS playback
 
@@ -127,9 +128,8 @@ const AudioManager = (() => {
                     const audioBlob = await response.blob();
                     const audioUrl = URL.createObjectURL(audioBlob);
 
-                    const audio = new Audio(audioUrl);
-                    isSpeaking = true;
-
+                    // Reuse the persistent audio element (unlocked on user gesture)
+                    const audio = speechAudio || new Audio();
                     audio.onended = () => {
                         isSpeaking = false;
                         URL.revokeObjectURL(audioUrl);
@@ -140,6 +140,8 @@ const AudioManager = (() => {
                         URL.revokeObjectURL(audioUrl);
                         resumeRecognition();
                     };
+                    audio.src = audioUrl;
+                    isSpeaking = true;
 
                     await audio.play();
                     return;
@@ -186,6 +188,10 @@ const AudioManager = (() => {
     }
 
     function stopSpeaking() {
+        if (speechAudio) {
+            speechAudio.pause();
+            speechAudio.currentTime = 0;
+        }
         if ('speechSynthesis' in window) {
             speechSynthesis.cancel();
         }
@@ -394,7 +400,23 @@ const AudioManager = (() => {
 
     // --- Unlock audio on mobile (must be called from a user gesture) ---
     function unlock() {
-        // Unlock AudioContext
+        // Create persistent audio element and unlock it with a silent play
+        // This element will be reused for ALL TTS playback
+        if (!speechAudio) {
+            speechAudio = new Audio();
+        }
+        try {
+            speechAudio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+            speechAudio.volume = 1;
+            speechAudio.play().then(() => {
+                speechAudio.pause();
+                speechAudio.currentTime = 0;
+                speechAudio.src = '';
+                console.log('[AudioManager] speechAudio unlocked');
+            }).catch(() => {});
+        } catch (e) { /* ignore */ }
+
+        // Also unlock AudioContext
         try {
             const ctx = new (window.AudioContext || window.webkitAudioContext)();
             const buffer = ctx.createBuffer(1, 1, 22050);
@@ -404,21 +426,6 @@ const AudioManager = (() => {
             source.start(0);
             ctx.resume();
         } catch (e) { /* ignore */ }
-
-        // Unlock HTML5 Audio element
-        try {
-            const a = new Audio();
-            a.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
-            a.volume = 0;
-            a.play().then(() => a.pause()).catch(() => {});
-        } catch (e) { /* ignore */ }
-
-        // Unlock speechSynthesis
-        if ('speechSynthesis' in window) {
-            const u = new SpeechSynthesisUtterance('');
-            u.volume = 0;
-            speechSynthesis.speak(u);
-        }
 
         console.log('[AudioManager] Audio unlocked via user gesture');
     }
