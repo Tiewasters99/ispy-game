@@ -1,14 +1,12 @@
-// Vercel Serverless Function — ElevenLabs TTS for essay read-aloud
-// Costs 5 credits per call (subscribers exempt). Falls back gracefully.
-
-import { createClient } from '@supabase/supabase-js';
+// Vercel Serverless Function — ElevenLabs TTS (Professor Jones voice)
+// No credit cost — voice is core gameplay.
 
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method not allowed' });
     }
 
-    const { text, userId } = req.body;
+    const { text } = req.body;
 
     if (!text) {
         return res.status(400).json({ error: 'Missing text' });
@@ -21,43 +19,6 @@ export default async function handler(req, res) {
         return res.status(500).json({ error: 'ElevenLabs API key not configured' });
     }
 
-    // Initialize Supabase for credit management
-    const supabase = createClient(
-        process.env.SUPABASE_URL,
-        process.env.SUPABASE_SERVICE_KEY
-    );
-
-    // Check/deduct credits
-    if (userId) {
-        const { data: user, error } = await supabase
-            .from('users')
-            .select('credits, is_subscriber')
-            .eq('id', userId)
-            .single();
-
-        if (error || !user) {
-            return res.status(401).json({ error: 'User not found' });
-        }
-
-        if (!user.is_subscriber) {
-            const ttsCost = 5;
-
-            if (user.credits < ttsCost) {
-                return res.status(402).json({
-                    error: 'Insufficient credits for TTS',
-                    credits: user.credits,
-                    required: ttsCost
-                });
-            }
-
-            // Deduct credits
-            await supabase
-                .from('users')
-                .update({ credits: user.credits - ttsCost })
-                .eq('id', userId);
-        }
-    }
-
     try {
         const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
             method: 'POST',
@@ -67,7 +28,7 @@ export default async function handler(req, res) {
             },
             body: JSON.stringify({
                 text: text,
-                model_id: 'eleven_monolingual_v1',
+                model_id: 'eleven_multilingual_v2',
                 voice_settings: {
                     stability: 0.5,
                     similarity_boost: 0.75
