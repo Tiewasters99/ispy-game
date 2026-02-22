@@ -36,20 +36,9 @@ const gameScreen = document.getElementById('game-screen');
 
 // --- Core: Send everything to the Game Master ---
 
-async function sendToGamemaster(transcript) {
-    if (isProcessing || !transcript) return;
-    isProcessing = true;
+let retryCount = 0;
 
-    // Cancel any pending silence timer — player is actively communicating
-    AudioManager.clearSilenceTimer();
-
-    // Show thinking indicator (hide internal system messages from transcript)
-    const isSystemMessage = transcript.startsWith('[');
-    if (!isSystemMessage) {
-        addTranscriptEntry('player', transcript);
-    }
-    addTranscriptEntry('jones', '...', true); // thinking indicator
-
+async function callGamemaster(transcript) {
     try {
         const user = typeof supabase !== 'undefined' ? supabase.auth.getUser() : null;
 
@@ -72,74 +61,102 @@ async function sendToGamemaster(transcript) {
                         region: gameState.location.region
                     }
                 },
-                conversationHistory: gameState.conversationHistory.slice(-40),
+                conversationHistory: gameState.conversationHistory.slice(-20),
                 transcript: transcript
             })
         });
 
-        // Remove thinking indicator
-        removeThinkingIndicator();
-
-        // Handle insufficient credits
         if (response.status === 402) {
             showOutOfCredits();
-            isProcessing = false;
-            return;
+            return null;
         }
 
         if (!response.ok) {
-            speak("Sorry, I lost my train of thought. Say that again?");
-            addTranscriptEntry('jones', "Sorry, I lost my train of thought. Say that again?");
-            isProcessing = false;
-            return;
-        }
-
-        const data = await response.json();
-
-        // Update conversation history
-        gameState.conversationHistory.push({ role: 'user', content: transcript });
-        gameState.conversationHistory.push({ role: 'assistant', content: data.speech });
-
-        // Trim history to last 40 messages (20 exchanges)
-        if (gameState.conversationHistory.length > 40) {
-            gameState.conversationHistory = gameState.conversationHistory.slice(-40);
-        }
-
-        // Start TTS fetch IMMEDIATELY — runs in parallel with action processing
-        const ttsPromise = data.speech ? AudioManager.prefetchAudio(data.speech) : null;
-
-        // Execute all actions (while TTS is fetching)
-        if (data.actions && Array.isArray(data.actions)) {
-            for (const action of data.actions) {
-                executeAction(action);
+            // Auto-retry once on server error
+            if (retryCount < 1) {
+                retryCount++;
+                console.warn('[Gamemaster] Request failed, retrying...', response.status);
+                return callGamemaster(transcript);
             }
+            console.error('[Gamemaster] Failed after retry:', response.status);
+            return null;
         }
 
-        // Update credits display
-        if (data.remainingCredits !== null && data.remainingCredits !== undefined) {
-            updateGameCreditsDisplay(data.remainingCredits);
-        }
-
-        // Show Professor Jones's response in transcript and play pre-fetched audio
-        if (data.speech) {
-            addTranscriptEntry('jones', data.speech);
-            AudioManager.playPrefetched(ttsPromise);
-        }
-
-        // Safety net: if category is set but Claude didn't generate a clue yet,
-        // auto-trigger clue generation (Claude sometimes splits "let me look around..." and the actual clue)
-        // This catches both: phase already 'playing' with no clue, AND truncated responses where set_phase was lost
-        if (gameState.category && !gameState.currentRound.answer && gameState.phase !== 'setup_intro') {
-            isProcessing = false;
-            setTimeout(() => sendToGamemaster('[Now generate the I Spy clue. Include a start_round action with letter, answer, hints, essay, proximity.]'), 1500);
-            return;
-        }
-
+        return await response.json();
     } catch (error) {
-        console.warn('Gamemaster error:', error);
+        // Auto-retry once on network error
+        if (retryCount < 1) {
+            retryCount++;
+            console.warn('[Gamemaster] Network error, retrying...', error);
+            return callGamemaster(transcript);
+        }
+        console.error('[Gamemaster] Failed after retry:', error);
+        return null;
+    }
+}
+
+async function sendToGamemaster(transcript) {
+    if (isProcessing || !transcript) return;
+    isProcessing = true;
+
+    // Cancel any pending silence timer — player is actively communicating
+    AudioManager.clearSilenceTimer();
+
+    // Show thinking indicator (hide internal system messages from transcript)
+    const isSystemMessage = transcript.startsWith('[');
+    if (!isSystemMessage) {
+        addTranscriptEntry('player', transcript);
+        addTranscriptEntry('jones', '...', true); // thinking indicator
+    }
+
+    const data = await callGamemaster(transcript);
+    if (!data) {
         removeThinkingIndicator();
-        speak("Sorry, I lost my train of thought. Say that again?");
-        addTranscriptEntry('jones', "Sorry, I lost my train of thought. Say that again?");
+        isProcessing = false;
+        return;
+    }
+
+    // Remove thinking indicator
+    removeThinkingIndicator();
+    retryCount = 0;
+
+    // Update conversation history
+    gameState.conversationHistory.push({ role: 'user', content: transcript });
+    if (data.speech) {
+        gameState.conversationHistory.push({ role: 'assistant', content: data.speech });
+    }
+
+    // Trim history to last 20 messages (10 exchanges)
+    if (gameState.conversationHistory.length > 20) {
+        gameState.conversationHistory = gameState.conversationHistory.slice(-20);
+    }
+
+    // Start TTS fetch IMMEDIATELY — runs in parallel with action processing
+    const ttsPromise = data.speech ? AudioManager.prefetchAudio(data.speech) : null;
+
+    // Execute all actions (while TTS is fetching)
+    if (data.actions && Array.isArray(data.actions)) {
+        for (const action of data.actions) {
+            executeAction(action);
+        }
+    }
+
+    // Update credits display
+    if (data.remainingCredits !== null && data.remainingCredits !== undefined) {
+        updateGameCreditsDisplay(data.remainingCredits);
+    }
+
+    // Show Professor Jones's response in transcript and play pre-fetched audio
+    if (data.speech) {
+        addTranscriptEntry('jones', data.speech);
+        AudioManager.playPrefetched(ttsPromise);
+    }
+
+    // Safety net: if category is set but Claude didn't generate a clue yet
+    if (gameState.category && !gameState.currentRound.answer && gameState.phase !== 'setup_intro') {
+        isProcessing = false;
+        setTimeout(() => sendToGamemaster('[Now generate the I Spy clue. Include a start_round action with letter, answer, hints, essay, proximity.]'), 1500);
+        return;
     }
 
     isProcessing = false;

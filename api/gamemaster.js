@@ -7,13 +7,16 @@ import { createClient } from '@supabase/supabase-js';
 
 const SYSTEM_PROMPT = `You are Professor Jones, the game master for "I Spy Road Trip" — a GPS-based educational guessing game played in the car.
 
-## Your Personality
+## Your Personality & Conversational Style
 - Warm and witty, but BRIEF. You're a game master, not a lecturer.
-- 1-2 sentences per response is ideal. 3 sentences is the max for most turns.
+- 1-2 sentences per response is ideal. 3 sentences is the absolute max.
 - Never repeat what the player just said back to them.
 - Don't over-explain rules or pad with filler ("That's a great question!", "Wonderful!", "Absolutely!")
 - Nicknames are fine but don't force them every turn.
 - Your speech is read aloud by TTS — every extra word costs time and patience.
+- Keep conversational momentum: respond quickly, don't set up what you're about to do ("Let me think...", "How about..."), just DO it.
+- React naturally to wrong guesses: "Nope!", "Not that one.", "Close!" — not "That's not quite right, but great try!"
+- For correct guesses, celebrate briefly and IMMEDIATELY offer the next round — don't wait for prompting.
 
 ## Game Phases
 
@@ -161,22 +164,24 @@ export default async function handler(req, res) {
         locationContext = `Players at GPS: ${location.latitude}, ${location.longitude}.`;
     }
 
-    const stateDescription = `
-CURRENT GAME STATE:
-- Phase: ${gameState?.phase || 'setup_intro'}
-- Players: ${JSON.stringify(gameState?.players || [])}
-- Round: ${gameState?.roundNumber || 0}
-- Category: ${gameState?.category || 'not chosen yet'}
-- Current Round: ${JSON.stringify(gameState?.currentRound || {})}
-- Location: ${locationContext || 'Unknown'}
+    // Strip essay from currentRound to save tokens (Claude already generated it)
+    const roundForContext = gameState?.currentRound ? { ...gameState.currentRound } : {};
+    delete roundForContext.essay;
 
-PLAYER SAID: "${transcript}"`;
+    const stateDescription = `
+GAME STATE:
+Phase: ${gameState?.phase || 'setup_intro'} | Round: ${gameState?.roundNumber || 0} | Category: ${gameState?.category || 'none'}
+Players: ${JSON.stringify(gameState?.players || [])}
+Round: ${JSON.stringify(roundForContext)}
+Location: ${locationContext || 'Unknown'}
+
+"${transcript}"`;
 
     // Build messages array with conversation history
     const messages = [];
 
-    // Add conversation history (last 20 exchanges)
-    const history = (conversationHistory || []).slice(-40); // 40 messages = 20 exchanges
+    // Add conversation history (last 10 exchanges)
+    const history = (conversationHistory || []).slice(-20); // 20 messages = 10 exchanges
     for (const entry of history) {
         messages.push({
             role: entry.role,
@@ -200,7 +205,7 @@ PLAYER SAID: "${transcript}"`;
             },
             body: JSON.stringify({
                 model: 'claude-3-5-haiku-20241022',
-                max_tokens: 4096,
+                max_tokens: 2048,
                 system: SYSTEM_PROMPT,
                 messages: messages
             })
