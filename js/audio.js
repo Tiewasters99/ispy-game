@@ -24,15 +24,34 @@ const AudioManager = (() => {
     const hasSpeechRecognition = !!SpeechRecognition;
 
     // --- Voice Selection ---
+    // Prefer male/deep voices for Professor Jones persona. Avoid default female voices.
+    const VOICE_AVOID = /sarah|samantha|siri|zira|hazel|susan|jenny|aria/i;
+
     const VOICE_PRIORITIES = [
-        v => /microsoft.*online.*natural/i.test(v.name),
-        v => /microsoft.*neural/i.test(v.name),
-        v => /google.*us/i.test(v.name),
-        v => /google/i.test(v.name),
-        v => /natural/i.test(v.name),
-        v => /neural/i.test(v.name),
-        v => /premium|enhanced/i.test(v.name),
-        v => /en[-_]/i.test(v.lang),
+        // Male voices by name (cross-platform)
+        v => /daniel/i.test(v.name) && !VOICE_AVOID.test(v.name),
+        v => /james/i.test(v.name) && !VOICE_AVOID.test(v.name),
+        v => /guy/i.test(v.name) && !VOICE_AVOID.test(v.name),
+        v => /mark/i.test(v.name) && !VOICE_AVOID.test(v.name),
+        v => /david/i.test(v.name) && !VOICE_AVOID.test(v.name),
+        v => /alex/i.test(v.name) && !VOICE_AVOID.test(v.name),
+        v => /fred/i.test(v.name) && !VOICE_AVOID.test(v.name),
+        // Microsoft natural/neural male voices
+        v => /microsoft.*(guy|mark|david|ryan)/i.test(v.name),
+        v => /microsoft.*online.*natural/i.test(v.name) && !VOICE_AVOID.test(v.name),
+        v => /microsoft.*neural/i.test(v.name) && !VOICE_AVOID.test(v.name),
+        // Google voices (typically more neutral)
+        v => /google.*us/i.test(v.name) && !VOICE_AVOID.test(v.name),
+        v => /google.*uk/i.test(v.name) && !VOICE_AVOID.test(v.name),
+        // Any male-tagged voice
+        v => /male/i.test(v.name) && !/female/i.test(v.name),
+        // Any natural/neural that isn't on the avoid list
+        v => /natural|neural|premium|enhanced/i.test(v.name) && !VOICE_AVOID.test(v.name),
+        // Any English voice not on the avoid list
+        v => /en[-_]/i.test(v.lang) && !VOICE_AVOID.test(v.name),
+        // Last resort: anything not on the avoid list
+        v => !VOICE_AVOID.test(v.name),
+        // True last resort
         () => true
     ];
 
@@ -83,9 +102,13 @@ const AudioManager = (() => {
 
         stopSpeaking();
 
-        const wasListening = isListening;
-        if (wasListening) {
+        // Always pause recognition during TTS to prevent echo
+        const wasPaused = isPaused;
+        if (isListening) {
             pauseRecognition();
+        } else if (!isPaused) {
+            // Mark as paused anyway so resumeRecognition knows to restart after TTS
+            isPaused = true;
         }
 
         try {
@@ -112,12 +135,12 @@ const AudioManager = (() => {
                     audio.onended = () => {
                         isSpeaking = false;
                         URL.revokeObjectURL(audioUrl);
-                        if (wasListening) resumeRecognition();
+                        resumeRecognition();
                     };
                     audio.onerror = () => {
                         isSpeaking = false;
                         URL.revokeObjectURL(audioUrl);
-                        if (wasListening) resumeRecognition();
+                        resumeRecognition();
                     };
 
                     await audio.play();
@@ -128,11 +151,16 @@ const AudioManager = (() => {
             // Fall through to browser TTS
         }
 
-        speakBrowser(text, wasListening);
+        speakBrowser(text);
     }
 
-    function speakBrowser(text, resumeAfter) {
-        if (!('speechSynthesis' in window)) return;
+    function speakBrowser(text) {
+        if (!('speechSynthesis' in window)) {
+            // Can't speak at all — just make sure we resume listening
+            isSpeaking = false;
+            resumeRecognition();
+            return;
+        }
 
         speechSynthesis.cancel();
 
@@ -147,11 +175,11 @@ const AudioManager = (() => {
         utterance.onstart = () => { isSpeaking = true; };
         utterance.onend = () => {
             isSpeaking = false;
-            if (resumeAfter) resumeRecognition();
+            resumeRecognition();
         };
         utterance.onerror = () => {
             isSpeaking = false;
-            if (resumeAfter) resumeRecognition();
+            resumeRecognition();
         };
 
         speechSynthesis.speak(utterance);

@@ -134,18 +134,6 @@ async function sendToGamemaster(transcript) {
     }
 
     isProcessing = false;
-
-    // Ensure command mode stays alive for hands-free use.
-    // speak() pauses recognition; it resumes after TTS ends.
-    // But as a fallback, if recognition dies, restart it after TTS should be done.
-    if (AudioManager.hasSpeechRecognition && !AudioManager.muted && !AudioManager.isListening) {
-        // Give TTS time to finish, then ensure listening restarts
-        setTimeout(() => {
-            if (!AudioManager.isListening && !AudioManager.isSpeaking) {
-                AudioManager.startListening('command');
-            }
-        }, 5000);
-    }
 }
 
 // --- Execute structured actions from the Game Master ---
@@ -408,11 +396,15 @@ function startGame() {
         AudioManager.startListening('command');
     }
 
+    // Start heartbeat to keep recognition alive on mobile
+    startHeartbeat();
+
     // Trigger Professor Jones's greeting
     sendToGamemaster('[Game session started]');
 }
 
 function endGame() {
+    stopHeartbeat();
     AudioManager.stopSpeaking();
     AudioManager.stopEssay();
     AudioManager.stopListening();
@@ -568,16 +560,71 @@ function updateLocationDisplay(text) {
     if (locationEl) locationEl.textContent = text;
 }
 
+// --- Voice Input Handler (trigger words + direct speech) ---
+
+const TRIGGER_WORDS = /^(send|go|play|start|begin|submit|okay|ok)$/i;
+
+function handleVoiceInput(transcript) {
+    if (!transcript) return;
+
+    const trimmed = transcript.trim();
+
+    // If it's a trigger word and there's text in the input, send the input text
+    if (TRIGGER_WORDS.test(trimmed)) {
+        const textInput = document.getElementById('text-input');
+        if (textInput && textInput.value.trim()) {
+            const text = textInput.value.trim();
+            textInput.value = '';
+            sendToGamemaster(text);
+            return;
+        }
+        // No text in input — treat trigger word as speech to Professor Jones
+        // (e.g., "go" might mean "go ahead", "start" might mean "start the game")
+    }
+
+    // Otherwise send the spoken words directly to the gamemaster
+    sendToGamemaster(trimmed);
+}
+
+// --- Recognition Heartbeat ---
+// Ensures command mode stays alive on mobile where it tends to die silently.
+// Checks every 3 seconds: if the game is active and we should be listening but aren't, restart.
+
+let heartbeatInterval = null;
+
+function startHeartbeat() {
+    if (heartbeatInterval) return;
+    heartbeatInterval = setInterval(() => {
+        const gameActive = gameScreen && gameScreen.classList.contains('active');
+        if (gameActive &&
+            AudioManager.hasSpeechRecognition &&
+            !AudioManager.muted &&
+            !AudioManager.isListening &&
+            !AudioManager.isSpeaking &&
+            !isProcessing) {
+            console.log('[Heartbeat] Recognition died, restarting command mode');
+            AudioManager.startListening('command');
+        }
+    }, 3000);
+}
+
+function stopHeartbeat() {
+    if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = null;
+    }
+}
+
 // --- Initialize ---
 
 document.addEventListener('DOMContentLoaded', () => {
     // AudioManager setup
     AudioManager.init();
 
-    // Both voice modes route raw transcript to sendToGamemaster
+    // Voice callback: handle trigger words + direct speech
     AudioManager.setCallbacks({
-        guess: (transcript) => sendToGamemaster(transcript),
-        command: (transcript) => sendToGamemaster(transcript)
+        guess: (transcript) => handleVoiceInput(transcript),
+        command: (transcript) => handleVoiceInput(transcript)
     });
 
     // Audio toggle button
