@@ -440,7 +440,7 @@ const AudioManager = (() => {
     // --- Silence Detection ---
     // After TTS finishes and recognition resumes, if no speech for ~4s,
     // fire a silence event so the app can auto-send to gamemaster.
-    const SILENCE_TIMEOUT = 6000;
+    const SILENCE_TIMEOUT = 12000;
 
     function startSilenceTimer() {
         clearSilenceTimer();
