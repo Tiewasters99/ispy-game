@@ -288,6 +288,16 @@ body {
     font-weight: 600;
 }
 
+.reset-btn {
+    background: transparent;
+    border: 1px solid #e94560;
+    color: #e94560;
+    padding: 8px 16px;
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 0.8rem;
+}
+
 #end-game-btn {
     background: transparent;
     border: 1px solid #a0a0a0;

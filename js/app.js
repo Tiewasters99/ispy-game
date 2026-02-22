@@ -448,6 +448,31 @@ function endGame() {
     }
 }
 
+function resetGame() {
+    // Force-clear processing state
+    isProcessing = false;
+    retryCount = 0;
+    AudioManager.stopSpeaking();
+    AudioManager.clearSilenceTimer();
+    removeThinkingIndicator();
+
+    // Clear transcript
+    const panel = document.getElementById('transcript');
+    if (panel) panel.innerHTML = '';
+
+    // Clear conversation history but keep game state
+    gameState.conversationHistory = [];
+
+    // Re-trigger Professor Jones
+    addTranscriptEntry('jones', 'Resetting...');
+    setTimeout(() => {
+        removeThinkingIndicator();
+        const panel2 = document.getElementById('transcript');
+        if (panel2) panel2.innerHTML = '';
+        sendToGamemaster('[Game reset. Greet the players and resume from current game state.]');
+    }, 500);
+}
+
 // Make endGame globally accessible
 window.endGame = endGame;
 
@@ -711,6 +736,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         });
+    }
+
+    // Reset button
+    const resetBtn = document.getElementById('reset-btn');
+    if (resetBtn) {
+        resetBtn.addEventListener('click', resetGame);
     }
 
     // End game listener
