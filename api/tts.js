@@ -15,7 +15,7 @@ export default async function handler(req, res) {
     }
 
     const elevenLabsKey = process.env.ELEVENLABS_API_KEY;
-    const voiceId = process.env.ELEVENLABS_VOICE_ID || 'EXAVITQu4vr4xnSDxMaL'; // default: Sarah
+    const voiceId = process.env.ELEVENLABS_VOICE_ID || 'KTjyUd6ZeCmAkkfvuuU2';
 
     if (!elevenLabsKey) {
         return res.status(500).json({ error: 'ElevenLabs API key not configured' });

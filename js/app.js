@@ -182,10 +182,12 @@ let gameState = {
     currentClue: null,
     hintIndex: 0,
     score: 0,
+    askMode: false, // Q&A mode after essay
     location: {
         latitude: null,
         longitude: null,
         city: null,
+        county: null,
         region: null,
         watching: false,
         watchId: null
@@ -292,11 +294,22 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     window.addEventListener('essay-playback-change', (e) => {
-        const { playing } = e.detail;
+        const { playing, source } = e.detail;
         const btn = document.getElementById('read-aloud-btn');
         if (btn) {
             btn.classList.toggle('playing', playing);
-            btn.textContent = playing ? 'Stop Reading' : 'Read Aloud';
+            if (playing) {
+                btn.textContent = source === 'elevenlabs' ? 'Stop Reading (ElevenLabs)' : 'Stop Reading';
+            } else {
+                btn.textContent = 'Read Aloud';
+                // When essay finishes, prompt for next action
+                const learnMoreVisible = !learnMoreContainer.classList.contains('hidden');
+                if (learnMoreVisible && !gameState.askMode) {
+                    setTimeout(() => {
+                        speak('Hungry for more? Ask me a question! Or say next round to keep playing.');
+                    }, 500);
+                }
+            }
         }
     });
 });
@@ -349,10 +362,14 @@ async function startNewRound(forceLetter = null) {
 
     // Update UI to show loading state
     currentLetterEl.textContent = letter;
-    currentHintEl.textContent = 'Generating clue...';
+    currentHintEl.textContent = 'Looking around your area...';
     guessInput.value = '';
     resultMessage.textContent = '';
     resultMessage.className = 'result-message';
+
+    // Immediate spoken feedback so users know the game is working
+    const locationName = gameState.location.city || gameState.location.region || 'around here';
+    speak(`Hmm, let me look around ${locationName}...`);
 
     // Try to fetch dynamic clue from Claude API
     const clue = await fetchClueFromAPI(letter);
@@ -376,8 +393,15 @@ async function startNewRound(forceLetter = null) {
         currentHintEl.textContent = gameState.currentClue.hints[0];
     }
 
-    // Speak AFTER we have the final letter (in case it changed during fallback)
-    speak(`I spy with my little eye, something that begins with ${gameState.currentLetter}`);
+    // Build location-aware spoken announcement
+    let announcement = `I spy with my little eye, something that begins with ${gameState.currentLetter}`;
+    if (gameState.currentClue?.proximity === 'nearby' && gameState.currentClue?.nearbyLocation) {
+        announcement = `I can't spy anything starting with ${gameState.currentLetter} right where you are, but I can spy something ${gameState.currentClue.nearbyLocation}! Can you guess what it is? It begins with ${gameState.currentLetter}`;
+    } else if (gameState.currentClue?.proximity === 'region') {
+        const regionName = gameState.location.region || 'your region';
+        announcement = `Nothing nearby starts with ${gameState.currentLetter}, but somewhere in ${regionName}, I spy something that begins with ${gameState.currentLetter}`;
+    }
+    speak(announcement);
 }
 
 async function fetchClueFromAPI(letter) {
@@ -396,6 +420,7 @@ async function fetchClueFromAPI(letter) {
                 latitude: gameState.location.latitude,
                 longitude: gameState.location.longitude,
                 city: gameState.location.city,
+                county: gameState.location.county,
                 region: gameState.location.region,
                 userId: user?.id || null
             })
@@ -455,6 +480,7 @@ function showNextHint() {
         speak(gameState.currentClue.hints[gameState.hintIndex]);
     } else {
         currentHintEl.textContent = "No more hints! Make your best guess.";
+        speak("No more hints! Make your best guess.");
     }
 }
 
@@ -468,13 +494,42 @@ function giveUp() {
     showAnswerActions();
 }
 
+function normalizeText(text) {
+    return text.toLowerCase()
+        .replace(/[^a-z0-9\s]/g, '')  // strip punctuation
+        .replace(/\b(the|a|an|of|in|at|on|and|for|to|is|was)\b/g, '') // strip filler words
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function isCloseEnough(guess, answer) {
+    const g = normalizeText(guess);
+    const a = normalizeText(answer);
+
+    // Exact match after normalization
+    if (g === a) return true;
+
+    // One contains the other
+    if (a.includes(g) || g.includes(a)) return true;
+
+    // Split into words and check if key words match
+    const guessWords = g.split(' ').filter(w => w.length > 2);
+    const answerWords = a.split(' ').filter(w => w.length > 2);
+
+    // If most answer words appear in the guess (or vice versa)
+    const matchedWords = answerWords.filter(w => guessWords.some(gw => gw.includes(w) || w.includes(gw)));
+    if (matchedWords.length >= Math.ceil(answerWords.length * 0.5)) return true;
+
+    return false;
+}
+
 function submitGuess() {
     const guess = guessInput.value.trim().toLowerCase();
     const answer = gameState.currentClue.answer.toLowerCase();
 
     if (!guess) return;
 
-    if (guess === answer) {
+    if (isCloseEnough(guess, answer)) {
         // Correct!
         gameState.score++;
         resultMessage.textContent = `Correct! The answer was ${gameState.currentClue.answer}`;
@@ -487,6 +542,7 @@ function submitGuess() {
         // Incorrect
         resultMessage.textContent = 'Not quite! Try again or ask for another hint.';
         resultMessage.className = 'result-message incorrect';
+        speak('Not quite! Try again or ask for another hint.');
     }
 }
 
@@ -521,9 +577,15 @@ function showLearnMore() {
 
     answerActions.classList.add('hidden');
     learnMoreContainer.classList.remove('hidden');
+
+    // Automatically read the essay aloud
+    readEssayAloud();
 }
 
 function proceedToNextRound() {
+    // Exit Q&A mode
+    gameState.askMode = false;
+
     // Hide learn more elements
     answerActions.classList.add('hidden');
     learnMoreContainer.classList.add('hidden');
@@ -594,8 +656,20 @@ function handleVoiceCommand(action, transcript) {
             AudioManager.stopSpeaking();
             AudioManager.stopEssay();
             break;
+        case 'hungryForMore':
+            if (learnMoreVisible) enterAskMode();
+            break;
         case 'endGame':
             endGame();
+            break;
+        case 'guess':
+            if (gameState.askMode && transcript) {
+                // In Q&A mode, treat unrecognized speech as a question
+                askQuestion(transcript);
+            } else if (guessVisible && transcript) {
+                guessInput.value = transcript;
+                submitGuess();
+            }
             break;
     }
 }
@@ -621,6 +695,51 @@ function toggleMicForGuess() {
 
 function toggleAudio() {
     AudioManager.toggle();
+}
+
+function enterAskMode() {
+    gameState.askMode = true;
+    speak('What would you like to know? Ask me anything about ' + (gameState.currentClue?.answer || 'this topic') + '.');
+}
+
+async function askQuestion(question) {
+    if (!question) return;
+
+    speak('Great question! Let me think...');
+
+    try {
+        const user = typeof supabase !== 'undefined' ? supabase.auth.getUser() : null;
+
+        const response = await fetch('/api/ask', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                question: question,
+                answer: gameState.currentClue?.answer || '',
+                category: getCategoryDisplayName(gameState.category),
+                city: gameState.location.city,
+                region: gameState.location.region,
+                userId: user?.id || null
+            })
+        });
+
+        if (!response.ok) {
+            speak("Sorry, I couldn't find an answer to that. Ask me something else or say next round.");
+            return;
+        }
+
+        const data = await response.json();
+
+        if (data.remainingCredits !== null && data.remainingCredits !== undefined) {
+            updateGameCreditsDisplay(data.remainingCredits);
+        }
+
+        // Speak the response — Professor Jones will end with a follow-up prompt
+        speak(data.response);
+    } catch (error) {
+        console.warn('Ask question error:', error);
+        speak("Sorry, I had trouble with that. Try asking again or say next round.");
+    }
 }
 
 // GPS/Location Functions
@@ -682,20 +801,17 @@ function handleLocationError(error) {
 
 async function reverseGeocode(lat, lon) {
     try {
-        // Using free Nominatim API (OpenStreetMap)
-        const response = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`,
-            { headers: { 'User-Agent': 'ISpyRoadTrip/1.0' } }
-        );
+        const response = await fetch(`/api/geocode?lat=${lat}&lon=${lon}`);
         const data = await response.json();
 
-        if (data.address) {
-            const city = data.address.city || data.address.town || data.address.village || data.address.county || '';
-            const state = data.address.state || '';
-            gameState.location.city = city;
-            gameState.location.region = state;
+        if (data.city || data.county || data.state) {
+            gameState.location.city = data.city || data.county || '';
+            gameState.location.county = data.county || '';
+            gameState.location.region = data.state || '';
 
-            const locationText = city && state ? `${city}, ${state}` : city || state || 'Unknown location';
+            const locationText = (data.city || data.county) && data.state
+                ? `${data.city || data.county}, ${data.state}`
+                : data.city || data.county || data.state || 'Unknown location';
             updateLocationDisplay(locationText);
         }
     } catch (error) {

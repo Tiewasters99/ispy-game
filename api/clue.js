@@ -9,7 +9,7 @@ export default async function handler(req, res) {
         return res.status(405).json({ error: 'Method not allowed' });
     }
 
-    const { category, letter, latitude, longitude, city, region, userId, token } = req.body;
+    const { category, letter, latitude, longitude, city, county, region, userId, token } = req.body;
 
     if (!category || !letter) {
         return res.status(400).json({ error: 'Missing required fields' });
@@ -61,23 +61,35 @@ export default async function handler(req, res) {
 
     // Build location context
     let locationContext = '';
+    let hasLocation = false;
     if (city && region) {
-        locationContext = `The players are currently near ${city}, ${region}.`;
+        locationContext = `The players are currently near ${city}${county ? ', ' + county : ''}, ${region}. Their GPS coordinates are approximately ${latitude}, ${longitude}.`;
+        hasLocation = true;
     } else if (latitude && longitude) {
-        locationContext = `The players are at coordinates ${latitude}, ${longitude}.`;
+        locationContext = `The players are at GPS coordinates ${latitude}, ${longitude}.`;
+        hasLocation = true;
     }
 
-    const prompt = `You are the game master for an educational "I Spy" road trip game. Generate a clue for players.
+    const prompt = `You are the game master for a GPS-based educational "I Spy" road trip game. The game is LOCATION-DRIVEN — clues must be tied to where the players physically are.
 
 Category: ${category}
 Letter: ${letter}
-${locationContext}
+${locationContext || 'Location unknown.'}
 
-Your task:
-1. Think of a famous person, place, event, or concept from the "${category}" category that starts with the letter "${letter}"
-2. If possible, choose something connected to the players' current location
-3. Generate 4 progressive hints (easy to hard)
-4. Write a brief educational essay (about 100 words)
+CRITICAL RULES — follow this priority order:
+
+1. FIRST PRIORITY: Find something starting with "${letter}" that is RIGHT WHERE THE PLAYERS ARE — a landmark, historic site, person from this town, local event, or notable place in their immediate city/town (within ~10 miles). Set "proximity" to "here".
+
+2. SECOND PRIORITY: If nothing starts with "${letter}" in their immediate area, find something within about 100 miles — a nearby city's landmark, a regional figure, a state-level historic site. Set "proximity" to "nearby" and set "nearbyLocation" to describe where it is relative to the player.
+
+3. LAST RESORT: If nothing in the category starts with "${letter}" within 100 miles, pick something notable from the broader state or region. Set "proximity" to "region".
+
+The answer MUST be geographically connected to the player's location. Never pick something random or unrelated to where they are.
+
+Generate:
+- 4 progressive hints (vague to specific), weaving in local geography
+- A 100-word educational essay connecting the answer to this location
+- The proximity level and nearby location description
 
 Respond in this exact JSON format:
 {
@@ -88,8 +100,10 @@ Respond in this exact JSON format:
         "Third hint (easier)",
         "Fourth hint (easiest/most specific)"
     ],
-    "essay": "A 100-word educational essay about this answer",
-    "locationRelevance": "Brief note about why this is relevant to the location, or null if not location-specific"
+    "essay": "A 100-word educational essay tying this answer to the player's location",
+    "proximity": "here" | "nearby" | "region",
+    "nearbyLocation": "e.g. 'about 45 miles south in Philadelphia' or null if proximity is 'here'",
+    "locationRelevance": "One sentence about why this is relevant to where the player is"
 }
 
 Only respond with valid JSON, no other text.`;

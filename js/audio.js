@@ -86,12 +86,67 @@ const AudioManager = (() => {
         console.log('[AudioManager] Initialized. Muted:', muted, '| Speech Recognition:', hasSpeechRecognition);
     }
 
-    // --- Browser TTS ---
-    function speak(text) {
+    // --- TTS (ElevenLabs primary, browser fallback) ---
+    async function speak(text) {
         if (muted || !text) return;
+
+        // Stop any ongoing speech
+        stopSpeaking();
+
+        // Auto-pause mic while speaking to prevent echo pickup
+        const wasListening = isListening;
+        if (wasListening) {
+            pauseRecognition();
+        }
+
+        try {
+            const user = typeof supabase !== 'undefined' ? supabase.auth.getUser() : null;
+
+            const response = await fetch('/api/tts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    text: text,
+                    userId: user?.id || null
+                })
+            });
+
+            if (response.ok) {
+                const contentType = response.headers.get('content-type');
+                if (contentType && contentType.includes('audio')) {
+                    const audioBlob = await response.blob();
+                    const audioUrl = URL.createObjectURL(audioBlob);
+
+                    // Use a temporary audio element for short utterances
+                    const audio = new Audio(audioUrl);
+                    isSpeaking = true;
+
+                    audio.onended = () => {
+                        isSpeaking = false;
+                        URL.revokeObjectURL(audioUrl);
+                        if (wasListening) resumeRecognition();
+                    };
+                    audio.onerror = () => {
+                        isSpeaking = false;
+                        URL.revokeObjectURL(audioUrl);
+                        if (wasListening) resumeRecognition();
+                    };
+
+                    await audio.play();
+                    return;
+                }
+            }
+        } catch (e) {
+            // Fall through to browser TTS
+        }
+
+        // Browser TTS fallback
+        speakBrowser(text, wasListening);
+    }
+
+    function speakBrowser(text, resumeAfter) {
         if (!('speechSynthesis' in window)) return;
 
-        // Cancel any ongoing speech
         speechSynthesis.cancel();
 
         const utterance = new SpeechSynthesisUtterance(text);
@@ -102,28 +157,18 @@ const AudioManager = (() => {
             utterance.voice = selectedVoice;
         }
 
-        // Auto-pause mic while speaking to prevent echo pickup
-        const wasListening = isListening;
-        if (wasListening) {
-            pauseRecognition();
-        }
-
         utterance.onstart = () => {
             isSpeaking = true;
         };
 
         utterance.onend = () => {
             isSpeaking = false;
-            if (wasListening) {
-                resumeRecognition();
-            }
+            if (resumeAfter) resumeRecognition();
         };
 
         utterance.onerror = () => {
             isSpeaking = false;
-            if (wasListening) {
-                resumeRecognition();
-            }
+            if (resumeAfter) resumeRecognition();
         };
 
         speechSynthesis.speak(utterance);
@@ -140,8 +185,9 @@ const AudioManager = (() => {
     async function speakEssay(text) {
         if (muted || !text) return;
 
-        // Stop any current essay playback
+        // Stop any current essay playback and browser TTS
         stopEssay();
+        stopSpeaking();
 
         try {
             const user = typeof supabase !== 'undefined' ? supabase.auth.getUser() : null;
@@ -156,7 +202,14 @@ const AudioManager = (() => {
             });
 
             if (!response.ok) {
-                console.warn('[AudioManager] TTS API failed, falling back to browser TTS');
+                console.warn('[AudioManager] TTS API returned', response.status, '- falling back to browser TTS');
+                speak(text);
+                return;
+            }
+
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('audio')) {
+                console.warn('[AudioManager] TTS API returned non-audio content-type:', contentType);
                 speak(text);
                 return;
             }
@@ -165,9 +218,15 @@ const AudioManager = (() => {
             const audioUrl = URL.createObjectURL(audioBlob);
 
             essayAudio.src = audioUrl;
-            essayAudio.play();
-            isEssayPlaying = true;
-            dispatchEvent('essay-playback-change', { playing: true });
+
+            try {
+                await essayAudio.play();
+                isEssayPlaying = true;
+                dispatchEvent('essay-playback-change', { playing: true, source: 'elevenlabs' });
+            } catch (playError) {
+                console.warn('[AudioManager] Audio play() failed:', playError);
+                speak(text);
+            }
 
         } catch (error) {
             console.warn('[AudioManager] ElevenLabs TTS error, falling back to browser:', error);
@@ -297,6 +356,7 @@ const AudioManager = (() => {
     // --- Voice Command Parser ---
     function parseVoiceCommand(transcript) {
         const t = transcript.toLowerCase().trim();
+        if (!t) return null;
 
         // Order matters — more specific patterns first
         const commands = [
@@ -304,6 +364,7 @@ const AudioManager = (() => {
             { patterns: [/\bgive up\b/, /\bshow answer\b/, /\bi give up\b/, /\bshow me\b/], action: 'giveUp' },
             { patterns: [/\bnext round\b/, /\bnext\b/, /\bcontinue\b/, /\bkeep going\b/], action: 'next' },
             { patterns: [/\blearn more\b/, /\btell me more\b/, /\bmore info\b/], action: 'learnMore' },
+            { patterns: [/\bhungry for more\b/, /\byes.*(more|please|sure)\b/, /\bask (a |another )?question\b/], action: 'hungryForMore' },
             { patterns: [/\bread aloud\b/, /\bread it\b/, /\bread the essay\b/, /\bread to me\b/], action: 'readAloud' },
             { patterns: [/\bstop\b/, /\bquiet\b/, /\bshut up\b/, /\bsilence\b/], action: 'stop' },
             { patterns: [/\bend game\b/, /\bquit\b/, /\bstop game\b/, /\bexit\b/], action: 'endGame' }
@@ -317,7 +378,8 @@ const AudioManager = (() => {
             }
         }
 
-        return null;
+        // No command matched — treat as a guess attempt
+        return { action: 'guess', transcript: t };
     }
 
     // --- Audio Toggle ---
