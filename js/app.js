@@ -95,12 +95,23 @@ async function callGamemaster(transcript) {
     }
 }
 
+let pendingTranscript = null;
+
 async function sendToGamemaster(transcript) {
-    if (isProcessing || !transcript) return;
-    isProcessing = true;
+    if (!transcript) return;
 
     // Cancel any pending silence timer — player is actively communicating
     AudioManager.clearSilenceTimer();
+
+    if (isProcessing) {
+        // Don't drop player input — queue it (real speech replaces queued silence)
+        const isSystemMessage = transcript.startsWith('[');
+        if (!isSystemMessage || !pendingTranscript) {
+            pendingTranscript = transcript;
+        }
+        return;
+    }
+    isProcessing = true;
 
     // Show thinking indicator (hide internal system messages from transcript)
     const isSystemMessage = transcript.startsWith('[');
@@ -160,6 +171,13 @@ async function sendToGamemaster(transcript) {
     }
 
     isProcessing = false;
+
+    // Process any queued input that arrived while we were busy
+    if (pendingTranscript) {
+        const queued = pendingTranscript;
+        pendingTranscript = null;
+        sendToGamemaster(queued);
+    }
 }
 
 // --- Execute structured actions from the Game Master ---
