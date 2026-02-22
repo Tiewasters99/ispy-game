@@ -1,5 +1,6 @@
 // AudioManager — Central audio module for I Spy Road Trip
-// Handles TTS (browser + ElevenLabs), Speech Recognition, and voice commands
+// Handles TTS (browser + ElevenLabs), Speech Recognition
+// Voice command parsing removed — Claude interprets all speech
 
 const AudioManager = (() => {
     // --- State ---
@@ -12,6 +13,7 @@ const AudioManager = (() => {
     let isSpeaking = false;
     let essayAudio = null; // <audio> element for ElevenLabs playback
     let isEssayPlaying = false;
+    let isPaused = false; // true while recognition is paused for TTS playback
 
     // Callbacks set by app.js
     let onVoiceGuess = null;
@@ -22,22 +24,15 @@ const AudioManager = (() => {
     const hasSpeechRecognition = !!SpeechRecognition;
 
     // --- Voice Selection ---
-    // Priority-ranked search for best available browser voice
     const VOICE_PRIORITIES = [
-        // Microsoft Neural voices (Edge/Windows) — excellent quality
         v => /microsoft.*online.*natural/i.test(v.name),
         v => /microsoft.*neural/i.test(v.name),
-        // Google voices (Chrome) — good quality
         v => /google.*us/i.test(v.name),
         v => /google/i.test(v.name),
-        // Any voice with "natural" or "neural" in name
         v => /natural/i.test(v.name),
         v => /neural/i.test(v.name),
-        // Any premium/enhanced voice
         v => /premium|enhanced/i.test(v.name),
-        // Any English voice
         v => /en[-_]/i.test(v.lang),
-        // Absolute fallback: first available
         () => true
     ];
 
@@ -55,7 +50,6 @@ const AudioManager = (() => {
             }
         }
 
-        // Ultimate fallback — just pick first voice
         selectedVoice = voices[0];
         voicesLoaded = true;
         console.log('[AudioManager] Fallback voice:', voices[0]?.name);
@@ -63,16 +57,13 @@ const AudioManager = (() => {
 
     // --- Init ---
     function init() {
-        // Load voices (async on most browsers)
         if ('speechSynthesis' in window) {
             selectBestVoice();
             speechSynthesis.onvoiceschanged = selectBestVoice;
         }
 
-        // Restore mute state
         updateMuteUI();
 
-        // Create reusable audio element for essay playback
         essayAudio = document.createElement('audio');
         essayAudio.addEventListener('ended', () => {
             isEssayPlaying = false;
@@ -90,10 +81,8 @@ const AudioManager = (() => {
     async function speak(text) {
         if (muted || !text) return;
 
-        // Stop any ongoing speech
         stopSpeaking();
 
-        // Auto-pause mic while speaking to prevent echo pickup
         const wasListening = isListening;
         if (wasListening) {
             pauseRecognition();
@@ -117,7 +106,6 @@ const AudioManager = (() => {
                     const audioBlob = await response.blob();
                     const audioUrl = URL.createObjectURL(audioBlob);
 
-                    // Use a temporary audio element for short utterances
                     const audio = new Audio(audioUrl);
                     isSpeaking = true;
 
@@ -140,7 +128,6 @@ const AudioManager = (() => {
             // Fall through to browser TTS
         }
 
-        // Browser TTS fallback
         speakBrowser(text, wasListening);
     }
 
@@ -157,15 +144,11 @@ const AudioManager = (() => {
             utterance.voice = selectedVoice;
         }
 
-        utterance.onstart = () => {
-            isSpeaking = true;
-        };
-
+        utterance.onstart = () => { isSpeaking = true; };
         utterance.onend = () => {
             isSpeaking = false;
             if (resumeAfter) resumeRecognition();
         };
-
         utterance.onerror = () => {
             isSpeaking = false;
             if (resumeAfter) resumeRecognition();
@@ -185,7 +168,6 @@ const AudioManager = (() => {
     async function speakEssay(text) {
         if (muted || !text) return;
 
-        // Stop any current essay playback and browser TTS
         stopEssay();
         stopSpeaking();
 
@@ -251,7 +233,6 @@ const AudioManager = (() => {
     function startListening(mode) {
         if (!hasSpeechRecognition || muted) return false;
 
-        // Stop any existing session
         stopListening();
 
         recognitionMode = mode; // 'guess' or 'command'
@@ -277,13 +258,11 @@ const AudioManager = (() => {
             const transcript = result[0].transcript.trim();
 
             if (result.isFinal) {
+                // Both modes pass raw transcript to callback — Claude interprets everything
                 if (mode === 'guess' && onVoiceGuess) {
                     onVoiceGuess(transcript);
-                } else if (mode === 'command') {
-                    const parsed = parseVoiceCommand(transcript);
-                    if (parsed && onVoiceCommand) {
-                        onVoiceCommand(parsed.action, transcript);
-                    }
+                } else if (mode === 'command' && onVoiceCommand) {
+                    onVoiceCommand(transcript);
                 }
             } else {
                 // Interim result — show feedback
@@ -292,11 +271,9 @@ const AudioManager = (() => {
         };
 
         recognition.onerror = (event) => {
-            // 'no-speech' and 'aborted' are expected, not real errors
             if (event.error !== 'no-speech' && event.error !== 'aborted') {
                 console.warn('[AudioManager] Recognition error:', event.error);
             }
-            // For guess mode, stop after error
             if (mode === 'guess') {
                 isListening = false;
                 dispatchEvent('listening-state-change', { listening: false, mode });
@@ -305,7 +282,6 @@ const AudioManager = (() => {
 
         recognition.onend = () => {
             if (mode === 'command' && isListening && !muted) {
-                // Restart continuous listening for commands
                 try {
                     recognition.start();
                 } catch (e) {
@@ -329,6 +305,7 @@ const AudioManager = (() => {
 
     function stopListening() {
         isListening = false;
+        isPaused = false;
         if (recognition) {
             try {
                 recognition.abort();
@@ -341,6 +318,8 @@ const AudioManager = (() => {
 
     function pauseRecognition() {
         if (recognition && isListening) {
+            isPaused = true;
+            isListening = false; // prevent command-mode auto-restart in onend
             try {
                 recognition.abort();
             } catch (e) { /* ignore */ }
@@ -348,38 +327,21 @@ const AudioManager = (() => {
     }
 
     function resumeRecognition() {
-        if (recognitionMode && !isSpeaking) {
-            startListening(recognitionMode);
-        }
-    }
-
-    // --- Voice Command Parser ---
-    function parseVoiceCommand(transcript) {
-        const t = transcript.toLowerCase().trim();
-        if (!t) return null;
-
-        // Order matters — more specific patterns first
-        const commands = [
-            { patterns: [/\bhint\b/, /\banother hint\b/, /\bnext hint\b/], action: 'hint' },
-            { patterns: [/\bgive up\b/, /\bshow answer\b/, /\bi give up\b/, /\bshow me\b/], action: 'giveUp' },
-            { patterns: [/\bnext round\b/, /\bnext\b/, /\bcontinue\b/, /\bkeep going\b/], action: 'next' },
-            { patterns: [/\blearn more\b/, /\btell me more\b/, /\bmore info\b/], action: 'learnMore' },
-            { patterns: [/\bhungry for more\b/, /\byes.*(more|please|sure)\b/, /\bask (a |another )?question\b/], action: 'hungryForMore' },
-            { patterns: [/\bread aloud\b/, /\bread it\b/, /\bread the essay\b/, /\bread to me\b/], action: 'readAloud' },
-            { patterns: [/\bstop\b/, /\bquiet\b/, /\bshut up\b/, /\bsilence\b/], action: 'stop' },
-            { patterns: [/\bend game\b/, /\bquit\b/, /\bstop game\b/, /\bexit\b/], action: 'endGame' }
-        ];
-
-        for (const cmd of commands) {
-            for (const pattern of cmd.patterns) {
-                if (pattern.test(t)) {
-                    return { action: cmd.action, transcript: t };
+        if (isPaused && recognitionMode && !isSpeaking) {
+            isPaused = false;
+            // Reuse existing recognition instance to avoid repeated permission prompts on mobile
+            if (recognition) {
+                try {
+                    isListening = true;
+                    recognition.start();
+                    dispatchEvent('listening-state-change', { listening: true, mode: recognitionMode });
+                    return;
+                } catch (e) {
+                    // Instance can't restart, fall through to create new one
                 }
             }
+            startListening(recognitionMode);
         }
-
-        // No command matched — treat as a guess attempt
-        return { action: 'guess', transcript: t };
     }
 
     // --- Audio Toggle ---
@@ -394,7 +356,7 @@ const AudioManager = (() => {
         }
 
         updateMuteUI();
-        return !muted; // returns true if audio is now ON
+        return !muted;
     }
 
     function updateMuteUI() {
@@ -402,7 +364,6 @@ const AudioManager = (() => {
         if (btn) {
             btn.classList.toggle('muted', muted);
             btn.title = muted ? 'Unmute audio' : 'Mute audio';
-            // Update SVG icon
             const icon = btn.querySelector('.audio-icon');
             if (icon) {
                 icon.innerHTML = muted

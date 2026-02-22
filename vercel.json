@@ -1,5 +1,9 @@
 {
   "functions": {
+    "api/gamemaster.js": {
+      "memory": 1024,
+      "maxDuration": 30
+    },
     "api/tts.js": {
       "memory": 1024,
       "maxDuration": 15
@@ -8,5 +12,25 @@
       "memory": 1024,
       "maxDuration": 30
     }
-  }
+  },
+  "headers": [
+    {
+      "source": "/js/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/css/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }
+      ]
+    },
+    {
+      "source": "/index.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }
+      ]
+    }
+  ]
 }

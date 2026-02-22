@@ -80,11 +80,11 @@ CRITICAL RULES — follow this priority order:
 
 1. FIRST PRIORITY: Find something starting with "${letter}" that is RIGHT WHERE THE PLAYERS ARE — a landmark, historic site, person from this town, local event, or notable place in their immediate city/town (within ~10 miles). Set "proximity" to "here".
 
-2. SECOND PRIORITY: If nothing starts with "${letter}" in their immediate area, find something within about 100 miles — a nearby city's landmark, a regional figure, a state-level historic site. Set "proximity" to "nearby" and set "nearbyLocation" to describe where it is relative to the player.
+2. SECOND PRIORITY: If nothing starts with "${letter}" in their immediate area, find something within about 100 miles — a nearby city's landmark, a regional figure, a state-level historic site. Set "proximity" to "nearby" and set "nearbyLocation" to a SPECIFIC place-relative description like "about 45 miles south in Philadelphia" or "30 miles east near Princeton". ALWAYS name a specific city or town — NEVER just say the state name.
 
-3. LAST RESORT: If nothing in the category starts with "${letter}" within 100 miles, pick something notable from the broader state or region. Set "proximity" to "region".
+3. LAST RESORT: If nothing in the category starts with "${letter}" within 100 miles, pick something notable from the broader state or region. Set "proximity" to "region". Even for region-level answers, "nearbyLocation" MUST name a specific city or area (e.g. "up in Newark" or "down in Cape May"), never just the state name.
 
-The answer MUST be geographically connected to the player's location. Never pick something random or unrelated to where they are.
+The answer MUST be geographically connected to the player's location. Never pick something random or unrelated to where they are. The "nearbyLocation" field must ALWAYS reference a specific city or place, never just a state.
 
 Generate:
 - 4 progressive hints (vague to specific), weaving in local geography
@@ -102,7 +102,7 @@ Respond in this exact JSON format:
     ],
     "essay": "A 100-word educational essay tying this answer to the player's location",
     "proximity": "here" | "nearby" | "region",
-    "nearbyLocation": "e.g. 'about 45 miles south in Philadelphia' or null if proximity is 'here'",
+    "nearbyLocation": "e.g. 'about 45 miles south of here, in Philadelphia' — MUST include distance AND direction (north/south/east/west) AND a specific city name. Never just a state.",
     "locationRelevance": "One sentence about why this is relevant to where the player is"
 }
 

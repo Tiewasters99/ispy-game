@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>I Spy Road Trip</title>
-    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/styles.css?v=2">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#2c3e50">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -63,30 +63,14 @@
 
             <hr class="divider">
 
-            <label for="player-count">Number of Players</label>
-            <select id="player-count">
-                <option value="2">2 Players</option>
-                <option value="3">3 Players</option>
-                <option value="4">4 Players</option>
-                <option value="5" selected>5 Players</option>
-                <option value="6">6 Players</option>
-            </select>
-
-            <label>Select Category</label>
-            <div class="category-buttons">
-                <button class="category-btn" data-category="civil-rights">Civil Rights</button>
-                <button class="category-btn" data-category="music">Music Industry</button>
-                <button class="category-btn" data-category="hollywood">Hollywood</button>
-                <button class="category-btn" data-category="history">American History</button>
-                <button class="category-btn" data-category="science">Science</button>
-            </div>
+            <button id="start-game-btn" class="start-game-btn">Start Road Trip</button>
         </div>
     </div>
 
     <!-- Game Screen -->
     <div id="game-screen" class="screen">
         <div class="game-header">
-            <span id="category-display">Civil Rights</span>
+            <span id="category-display" class="category-badge">I Spy Road Trip</span>
             <span id="location-display" class="location-display">Getting location...</span>
             <span id="game-credits-display" class="credits-badge">0</span>
             <button id="audio-toggle-btn" class="audio-toggle" title="Mute audio">
@@ -97,22 +81,33 @@
             <button id="end-game-btn">End Game</button>
         </div>
 
-        <div class="clue-container">
+        <!-- Scoreboard -->
+        <div id="scoreboard" class="scoreboard hidden"></div>
+
+        <!-- Round Info (letter display) -->
+        <div id="round-info" class="round-info hidden">
             <p class="clue-intro">I spy with my little eye something that begins with...</p>
-            <div id="current-letter" class="big-letter">M</div>
+            <div id="current-letter" class="big-letter"></div>
         </div>
 
-        <div class="hint-container">
-            <p id="current-hint">Loading clue...</p>
-            <div class="hint-buttons">
-                <button id="next-hint-btn">Another Hint</button>
-                <button id="give-up-btn">Give Up? Show Answer</button>
-            </div>
+        <!-- Hint Display -->
+        <div id="hint-display" class="hint-display hidden">
+            <p id="hint-text"></p>
         </div>
 
-        <div class="guess-container">
-            <input type="text" id="guess-input" placeholder="Enter your guess...">
-            <button id="mic-btn" class="mic-btn" title="Speak your guess">
+        <!-- Essay Display -->
+        <div id="essay-display" class="essay-display hidden">
+            <p id="essay-text"></p>
+            <button id="read-aloud-btn" class="read-aloud-btn">Read Aloud</button>
+        </div>
+
+        <!-- Transcript Panel -->
+        <div id="transcript" class="transcript"></div>
+
+        <!-- Voice Input Area -->
+        <div class="voice-input-area">
+            <input type="text" id="text-input" placeholder="Talk to Professor Jones...">
+            <button id="mic-btn" class="mic-btn" title="Speak">
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
                     <path d="M19 10v2a7 7 0 01-14 0v-2"/>
@@ -120,29 +115,13 @@
                     <line x1="8" y1="23" x2="16" y2="23"/>
                 </svg>
             </button>
-            <button id="submit-guess-btn">Submit Guess</button>
-        </div>
-
-        <div id="result-message" class="result-message"></div>
-
-        <div id="answer-actions" class="answer-actions hidden">
-            <button id="learn-more-btn">Want to learn more?</button>
-            <button id="skip-btn">Next Round</button>
-        </div>
-
-        <div id="learn-more-container" class="learn-more-container hidden">
-            <p id="learn-more-text"></p>
-            <div class="learn-more-buttons">
-                <button id="read-aloud-btn" class="read-aloud-btn">Read Aloud</button>
-                <a id="hungry-for-more-btn" href="#" target="_blank">Hungry for More? Ask Claude</a>
-                <button id="continue-btn">Continue</button>
-            </div>
+            <button id="send-btn" class="send-btn">Send</button>
         </div>
 
         <!-- Voice Command Indicator Bar -->
         <div id="voice-command-bar" class="voice-command-bar hidden">
             <span class="voice-dot"></span>
-            <span id="voice-command-text">Listening for commands...</span>
+            <span id="voice-command-text">Listening...</span>
         </div>
 
         <!-- Out of Credits Modal -->
@@ -156,8 +135,8 @@
         </div>
     </div>
 
-    <script src="js/auth.js"></script>
-    <script src="js/audio.js"></script>
-    <script src="js/app.js"></script>
+    <script src="js/auth.js?v=2"></script>
+    <script src="js/audio.js?v=2"></script>
+    <script src="js/app.js?v=2"></script>
 </body>
 </html>

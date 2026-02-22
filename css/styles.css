@@ -25,282 +25,6 @@ body {
     display: block;
 }
 
-/* Setup Screen */
-#setup-screen h1 {
-    text-align: center;
-    font-size: 2rem;
-    margin-bottom: 30px;
-    color: #e94560;
-}
-
-.setup-form {
-    background: rgba(255, 255, 255, 0.1);
-    padding: 25px;
-    border-radius: 15px;
-}
-
-.setup-form label {
-    display: block;
-    margin-bottom: 10px;
-    font-weight: 600;
-    color: #a0a0a0;
-}
-
-.setup-form select {
-    width: 100%;
-    padding: 15px;
-    font-size: 1rem;
-    border: none;
-    border-radius: 10px;
-    background: #0f3460;
-    color: #ffffff;
-    margin-bottom: 25px;
-}
-
-.category-buttons {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-.category-btn {
-    padding: 18px;
-    font-size: 1.1rem;
-    border: 2px solid #e94560;
-    border-radius: 10px;
-    background: transparent;
-    color: #ffffff;
-    cursor: pointer;
-    transition: all 0.3s ease;
-}
-
-.category-btn:hover {
-    background: #e94560;
-    transform: scale(1.02);
-}
-
-/* Game Screen */
-.game-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 20px;
-    flex-wrap: wrap;
-}
-
-#category-display {
-    background: #e94560;
-    padding: 8px 16px;
-    border-radius: 20px;
-    font-size: 0.9rem;
-}
-
-.location-display {
-    background: rgba(255, 255, 255, 0.1);
-    padding: 6px 12px;
-    border-radius: 15px;
-    font-size: 0.8rem;
-    color: #a0a0a0;
-    max-width: 150px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-#end-game-btn {
-    background: transparent;
-    border: 1px solid #a0a0a0;
-    color: #a0a0a0;
-    padding: 8px 16px;
-    border-radius: 20px;
-    cursor: pointer;
-}
-
-.clue-container {
-    text-align: center;
-    margin: 30px 0;
-}
-
-.clue-intro {
-    font-size: 1.2rem;
-    color: #a0a0a0;
-    margin-bottom: 15px;
-}
-
-.big-letter {
-    font-size: 6rem;
-    font-weight: 800;
-    color: #e94560;
-    text-shadow: 0 0 30px rgba(233, 69, 96, 0.5);
-}
-
-.hint-container {
-    background: rgba(255, 255, 255, 0.1);
-    padding: 20px;
-    border-radius: 15px;
-    text-align: center;
-    margin-bottom: 20px;
-}
-
-#current-hint {
-    font-size: 1.1rem;
-    line-height: 1.6;
-    margin-bottom: 15px;
-}
-
-.hint-buttons {
-    display: flex;
-    gap: 10px;
-    justify-content: center;
-}
-
-#next-hint-btn {
-    background: #0f3460;
-    border: none;
-    color: #ffffff;
-    padding: 10px 20px;
-    border-radius: 8px;
-    cursor: pointer;
-}
-
-#give-up-btn {
-    background: transparent;
-    border: 1px solid #e94560;
-    color: #e94560;
-    padding: 10px 20px;
-    border-radius: 8px;
-    cursor: pointer;
-}
-
-.guess-container {
-    display: flex;
-    gap: 10px;
-    margin-bottom: 20px;
-}
-
-#guess-input {
-    flex: 1;
-    padding: 15px;
-    font-size: 1rem;
-    border: none;
-    border-radius: 10px;
-    background: rgba(255, 255, 255, 0.1);
-    color: #ffffff;
-}
-
-#guess-input::placeholder {
-    color: #a0a0a0;
-}
-
-#submit-guess-btn {
-    padding: 15px 25px;
-    font-size: 1rem;
-    border: none;
-    border-radius: 10px;
-    background: #e94560;
-    color: #ffffff;
-    cursor: pointer;
-}
-
-.result-message {
-    text-align: center;
-    padding: 15px;
-    border-radius: 10px;
-    font-weight: 600;
-    min-height: 50px;
-}
-
-.result-message.correct {
-    background: rgba(46, 204, 113, 0.2);
-    color: #2ecc71;
-}
-
-.result-message.incorrect {
-    background: rgba(231, 76, 60, 0.2);
-    color: #e74c3c;
-}
-
-/* Hidden utility class */
-.hidden {
-    display: none !important;
-}
-
-/* Answer actions (Learn More / Skip) */
-.answer-actions {
-    display: flex;
-    gap: 10px;
-    justify-content: center;
-    margin-top: 20px;
-}
-
-#learn-more-btn {
-    background: #0f3460;
-    border: none;
-    color: #ffffff;
-    padding: 15px 25px;
-    border-radius: 10px;
-    cursor: pointer;
-    font-size: 1rem;
-}
-
-#skip-btn {
-    background: transparent;
-    border: 1px solid #a0a0a0;
-    color: #a0a0a0;
-    padding: 15px 25px;
-    border-radius: 10px;
-    cursor: pointer;
-    font-size: 1rem;
-}
-
-/* Learn More container */
-.learn-more-container {
-    background: rgba(255, 255, 255, 0.1);
-    padding: 20px;
-    border-radius: 15px;
-    margin-top: 20px;
-}
-
-#learn-more-text {
-    font-size: 1rem;
-    line-height: 1.7;
-    margin-bottom: 20px;
-    color: #e0e0e0;
-}
-
-.learn-more-buttons {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-#hungry-for-more-btn {
-    display: block;
-    width: 100%;
-    background: #0f3460;
-    border: none;
-    color: #ffffff;
-    padding: 15px 25px;
-    border-radius: 10px;
-    cursor: pointer;
-    font-size: 1rem;
-    text-align: center;
-    text-decoration: none;
-}
-
-#continue-btn {
-    display: block;
-    width: 100%;
-    background: #e94560;
-    border: none;
-    color: #ffffff;
-    padding: 15px 25px;
-    border-radius: 10px;
-    cursor: pointer;
-    font-size: 1rem;
-}
-
 /* Auth Screen */
 #auth-screen h1 {
     text-align: center;
@@ -362,7 +86,14 @@ body {
     color: #e94560;
 }
 
-/* Setup Header */
+/* Setup Screen */
+#setup-screen h1 {
+    text-align: center;
+    font-size: 2rem;
+    margin-bottom: 30px;
+    color: #e94560;
+}
+
 .setup-header {
     display: flex;
     justify-content: space-between;
@@ -399,6 +130,19 @@ body {
     border-radius: 15px;
     cursor: pointer;
     font-size: 0.8rem;
+}
+
+.setup-form {
+    background: rgba(255, 255, 255, 0.1);
+    padding: 25px;
+    border-radius: 15px;
+}
+
+.setup-form label {
+    display: block;
+    margin-bottom: 10px;
+    font-weight: 600;
+    color: #a0a0a0;
 }
 
 /* Credits Section */
@@ -460,6 +204,27 @@ body {
     margin: 20px 0;
 }
 
+/* Start Road Trip Button */
+.start-game-btn {
+    display: block;
+    width: 100%;
+    padding: 20px;
+    font-size: 1.3rem;
+    font-weight: 700;
+    border: none;
+    border-radius: 12px;
+    background: #e94560;
+    color: #ffffff;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    letter-spacing: 0.5px;
+}
+
+.start-game-btn:hover {
+    background: #d63651;
+    transform: scale(1.02);
+}
+
 /* Subscription Offer */
 .subscription-offer {
     background: linear-gradient(135deg, #e94560, #0f3460);
@@ -485,7 +250,35 @@ body {
     cursor: pointer;
 }
 
-/* Credits Badge in Game */
+/* Game Screen */
+.game-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 15px;
+    flex-wrap: wrap;
+}
+
+.category-badge {
+    background: #e94560;
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 0.9rem;
+}
+
+.location-display {
+    background: rgba(255, 255, 255, 0.1);
+    padding: 6px 12px;
+    border-radius: 15px;
+    font-size: 0.8rem;
+    color: #a0a0a0;
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .credits-badge {
     background: #2ecc71;
     color: #ffffff;
@@ -493,6 +286,308 @@ body {
     border-radius: 15px;
     font-size: 0.8rem;
     font-weight: 600;
+}
+
+#end-game-btn {
+    background: transparent;
+    border: 1px solid #a0a0a0;
+    color: #a0a0a0;
+    padding: 8px 16px;
+    border-radius: 20px;
+    cursor: pointer;
+}
+
+/* Scoreboard */
+.scoreboard {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 15px;
+    overflow-x: auto;
+    padding: 4px 0;
+}
+
+.player-card {
+    background: rgba(255, 255, 255, 0.1);
+    padding: 8px 14px;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 70px;
+    flex-shrink: 0;
+}
+
+.player-card.leader {
+    border: 2px solid #e94560;
+    background: rgba(233, 69, 96, 0.15);
+}
+
+.player-name {
+    font-size: 0.75rem;
+    color: #a0a0a0;
+    margin-bottom: 2px;
+    white-space: nowrap;
+}
+
+.player-card.leader .player-name {
+    color: #e94560;
+}
+
+.player-score {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: #ffffff;
+}
+
+/* Round Info */
+.round-info {
+    text-align: center;
+    margin-bottom: 15px;
+}
+
+.clue-intro {
+    font-size: 1rem;
+    color: #a0a0a0;
+    margin-bottom: 8px;
+}
+
+.big-letter {
+    font-size: 5rem;
+    font-weight: 800;
+    color: #e94560;
+    text-shadow: 0 0 30px rgba(233, 69, 96, 0.5);
+}
+
+/* Hint Display */
+.hint-display {
+    background: rgba(255, 255, 255, 0.1);
+    padding: 15px;
+    border-radius: 12px;
+    margin-bottom: 12px;
+    text-align: center;
+}
+
+#hint-text {
+    font-size: 1rem;
+    line-height: 1.5;
+    color: #e0e0e0;
+}
+
+/* Essay Display */
+.essay-display {
+    background: rgba(255, 255, 255, 0.1);
+    padding: 15px;
+    border-radius: 12px;
+    margin-bottom: 12px;
+}
+
+#essay-text {
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: #e0e0e0;
+    margin-bottom: 12px;
+}
+
+.read-aloud-btn {
+    display: block;
+    width: 100%;
+    background: #2ecc71;
+    border: none;
+    color: #ffffff;
+    padding: 12px 20px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 0.95rem;
+    transition: all 0.3s ease;
+}
+
+.read-aloud-btn:hover {
+    background: #27ae60;
+}
+
+.read-aloud-btn.playing {
+    background: #e94560;
+}
+
+.read-aloud-btn.playing:hover {
+    background: #c0392b;
+}
+
+/* Transcript Panel */
+.transcript {
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 12px;
+    padding: 12px;
+    max-height: 300px;
+    overflow-y: auto;
+    margin-bottom: 12px;
+    min-height: 80px;
+}
+
+.transcript-entry {
+    padding: 8px 12px;
+    border-radius: 10px;
+    margin-bottom: 6px;
+    font-size: 0.9rem;
+    line-height: 1.4;
+    max-width: 85%;
+}
+
+.transcript-entry:last-child {
+    margin-bottom: 0;
+}
+
+.transcript-entry.jones {
+    background: rgba(15, 52, 96, 0.7);
+    color: #e0e0e0;
+    margin-right: auto;
+}
+
+.transcript-entry.jones strong {
+    color: #5dade2;
+}
+
+.transcript-entry.player {
+    background: rgba(233, 69, 96, 0.2);
+    color: #f0f0f0;
+    margin-left: auto;
+    text-align: right;
+}
+
+.transcript-entry.thinking {
+    font-style: italic;
+    color: #888;
+    background: rgba(15, 52, 96, 0.4);
+}
+
+/* Voice Input Area */
+.voice-input-area {
+    display: flex;
+    gap: 8px;
+    position: sticky;
+    bottom: 0;
+    padding: 8px 0;
+    background: linear-gradient(transparent, #1a1a2e 30%);
+}
+
+#text-input {
+    flex: 1;
+    padding: 14px;
+    font-size: 1rem;
+    border: none;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+}
+
+#text-input::placeholder {
+    color: #a0a0a0;
+}
+
+.send-btn {
+    padding: 14px 20px;
+    font-size: 1rem;
+    border: none;
+    border-radius: 10px;
+    background: #e94560;
+    color: #ffffff;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.send-btn:hover {
+    background: #d63651;
+}
+
+/* Mic Button */
+.mic-btn {
+    padding: 12px 14px;
+    border: 2px solid #a0a0a0;
+    border-radius: 10px;
+    background: transparent;
+    color: #a0a0a0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s ease;
+    flex-shrink: 0;
+}
+
+.mic-btn:hover {
+    border-color: #e94560;
+    color: #e94560;
+}
+
+.mic-btn.listening {
+    border-color: #e94560;
+    color: #e94560;
+    background: rgba(233, 69, 96, 0.15);
+    animation: mic-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes mic-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(233, 69, 96, 0.4); }
+    50% { box-shadow: 0 0 0 8px rgba(233, 69, 96, 0); }
+}
+
+/* Audio Toggle */
+.audio-toggle {
+    background: transparent;
+    border: 1px solid #a0a0a0;
+    color: #a0a0a0;
+    padding: 6px 10px;
+    border-radius: 20px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s ease;
+}
+
+.audio-toggle:hover {
+    border-color: #ffffff;
+    color: #ffffff;
+}
+
+.audio-toggle.muted {
+    border-color: #e94560;
+    color: #e94560;
+}
+
+.audio-toggle .audio-icon {
+    display: block;
+}
+
+/* Voice Command Indicator Bar */
+.voice-command-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: rgba(15, 52, 96, 0.95);
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    z-index: 999;
+    font-size: 0.85rem;
+    color: #a0a0a0;
+    backdrop-filter: blur(10px);
+}
+
+.voice-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #e94560;
+    flex-shrink: 0;
+    animation: dot-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes dot-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
 }
 
 /* Modal */
@@ -549,133 +644,32 @@ body {
     color: #a0a0a0;
 }
 
-/* --- Audio UI Styles --- */
-
-/* Audio toggle button in game header */
-.audio-toggle {
-    background: transparent;
-    border: 1px solid #a0a0a0;
-    color: #a0a0a0;
-    padding: 6px 10px;
-    border-radius: 20px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.3s ease;
+/* Hidden utility */
+.hidden {
+    display: none !important;
 }
 
-.audio-toggle:hover {
-    border-color: #ffffff;
-    color: #ffffff;
-}
-
-.audio-toggle.muted {
-    border-color: #e94560;
-    color: #e94560;
-}
-
-.audio-toggle .audio-icon {
-    display: block;
-}
-
-/* Mic button next to guess input */
-.mic-btn {
-    padding: 12px 14px;
-    border: 2px solid #a0a0a0;
-    border-radius: 10px;
-    background: transparent;
-    color: #a0a0a0;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.3s ease;
-    flex-shrink: 0;
-}
-
-.mic-btn:hover {
-    border-color: #e94560;
-    color: #e94560;
-}
-
-.mic-btn.listening {
-    border-color: #e94560;
-    color: #e94560;
-    background: rgba(233, 69, 96, 0.15);
-    animation: mic-pulse 1.5s ease-in-out infinite;
-}
-
-@keyframes mic-pulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(233, 69, 96, 0.4); }
-    50% { box-shadow: 0 0 0 8px rgba(233, 69, 96, 0); }
-}
-
-/* Read Aloud button */
-.read-aloud-btn {
-    display: block;
-    width: 100%;
-    background: #2ecc71;
-    border: none;
-    color: #ffffff;
-    padding: 15px 25px;
-    border-radius: 10px;
-    cursor: pointer;
-    font-size: 1rem;
-    transition: all 0.3s ease;
-}
-
-.read-aloud-btn:hover {
-    background: #27ae60;
-}
-
-.read-aloud-btn.playing {
-    background: #e94560;
-}
-
-.read-aloud-btn.playing:hover {
-    background: #c0392b;
-}
-
-/* Voice command indicator bar */
-.voice-command-bar {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background: rgba(15, 52, 96, 0.95);
-    padding: 10px 20px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    z-index: 999;
-    font-size: 0.85rem;
-    color: #a0a0a0;
-    backdrop-filter: blur(10px);
-}
-
-.voice-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: #e94560;
-    flex-shrink: 0;
-    animation: dot-pulse 1.5s ease-in-out infinite;
-}
-
-@keyframes dot-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.3; }
-}
-
-/* Responsive: guess container with mic button */
+/* Responsive */
 @media (max-width: 400px) {
-    .guess-container {
+    .voice-input-area {
         flex-wrap: wrap;
     }
 
     .mic-btn {
         order: -1;
         width: 100%;
+    }
+
+    .big-letter {
+        font-size: 4rem;
+    }
+
+    .scoreboard {
+        gap: 6px;
+    }
+
+    .player-card {
+        padding: 6px 10px;
+        min-width: 60px;
     }
 }
