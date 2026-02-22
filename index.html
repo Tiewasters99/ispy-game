@@ -89,6 +89,11 @@
             <span id="category-display">Civil Rights</span>
             <span id="location-display" class="location-display">Getting location...</span>
             <span id="game-credits-display" class="credits-badge">0</span>
+            <button id="audio-toggle-btn" class="audio-toggle" title="Mute audio">
+                <svg class="audio-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/>
+                </svg>
+            </button>
             <button id="end-game-btn">End Game</button>
         </div>
 
@@ -107,6 +112,14 @@
 
         <div class="guess-container">
             <input type="text" id="guess-input" placeholder="Enter your guess...">
+            <button id="mic-btn" class="mic-btn" title="Speak your guess">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
+                    <path d="M19 10v2a7 7 0 01-14 0v-2"/>
+                    <line x1="12" y1="19" x2="12" y2="23"/>
+                    <line x1="8" y1="23" x2="16" y2="23"/>
+                </svg>
+            </button>
             <button id="submit-guess-btn">Submit Guess</button>
         </div>
 
@@ -120,9 +133,16 @@
         <div id="learn-more-container" class="learn-more-container hidden">
             <p id="learn-more-text"></p>
             <div class="learn-more-buttons">
+                <button id="read-aloud-btn" class="read-aloud-btn">Read Aloud</button>
                 <a id="hungry-for-more-btn" href="#" target="_blank">Hungry for More? Ask Claude</a>
                 <button id="continue-btn">Continue</button>
             </div>
+        </div>
+
+        <!-- Voice Command Indicator Bar -->
+        <div id="voice-command-bar" class="voice-command-bar hidden">
+            <span class="voice-dot"></span>
+            <span id="voice-command-text">Listening for commands...</span>
         </div>
 
         <!-- Out of Credits Modal -->
@@ -137,6 +157,7 @@
     </div>
 
     <script src="js/auth.js"></script>
+    <script src="js/audio.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>

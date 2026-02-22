@@ -235,6 +235,70 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // End game listener
     document.getElementById('end-game-btn').addEventListener('click', endGame);
+
+    // --- AudioManager setup ---
+    AudioManager.init();
+
+    // Register voice callbacks
+    AudioManager.setCallbacks({
+        guess: handleVoiceGuess,
+        command: handleVoiceCommand
+    });
+
+    // Audio toggle button
+    const audioToggleBtn = document.getElementById('audio-toggle-btn');
+    if (audioToggleBtn) {
+        audioToggleBtn.addEventListener('click', toggleAudio);
+    }
+
+    // Mic button for voice guess
+    const micBtn = document.getElementById('mic-btn');
+    if (micBtn) {
+        if (!AudioManager.hasSpeechRecognition) {
+            micBtn.classList.add('hidden');
+        } else {
+            micBtn.addEventListener('click', toggleMicForGuess);
+        }
+    }
+
+    // Read Aloud button
+    const readAloudBtn = document.getElementById('read-aloud-btn');
+    if (readAloudBtn) {
+        readAloudBtn.addEventListener('click', readEssayAloud);
+    }
+
+    // Listen for AudioManager custom events
+    window.addEventListener('listening-state-change', (e) => {
+        const { listening, mode } = e.detail;
+        const micBtnEl = document.getElementById('mic-btn');
+        const commandBar = document.getElementById('voice-command-bar');
+
+        if (micBtnEl) {
+            micBtnEl.classList.toggle('listening', listening && mode === 'guess');
+        }
+        if (commandBar) {
+            commandBar.classList.toggle('hidden', !(listening && mode === 'command'));
+        }
+    });
+
+    window.addEventListener('speech-interim', (e) => {
+        const { transcript, mode } = e.detail;
+        if (mode === 'guess') {
+            guessInput.value = transcript;
+        } else if (mode === 'command') {
+            const textEl = document.getElementById('voice-command-text');
+            if (textEl) textEl.textContent = transcript || 'Listening for commands...';
+        }
+    });
+
+    window.addEventListener('essay-playback-change', (e) => {
+        const { playing } = e.detail;
+        const btn = document.getElementById('read-aloud-btn');
+        if (btn) {
+            btn.classList.toggle('playing', playing);
+            btn.textContent = playing ? 'Stop Reading' : 'Read Aloud';
+        }
+    });
 });
 
 function startGame(category) {
@@ -248,6 +312,11 @@ function startGame(category) {
     setupScreen.classList.remove('active');
     gameScreen.classList.add('active');
     categoryDisplay.textContent = getCategoryDisplayName(category);
+
+    // Start voice command listening if available
+    if (AudioManager.hasSpeechRecognition && !AudioManager.muted) {
+        AudioManager.startListening('command');
+    }
 
     // Start first round
     startNewRound();
@@ -431,13 +500,7 @@ function pickLetterFromAnswer(answer) {
 }
 
 function speak(text) {
-    // Basic text-to-speech (Phase 2 will enhance this)
-    if ('speechSynthesis' in window) {
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.rate = 0.9;
-        utterance.pitch = 1;
-        speechSynthesis.speak(utterance);
-    }
+    AudioManager.speak(text);
 }
 
 function showAnswerActions() {
@@ -475,7 +538,9 @@ function proceedToNextRound() {
 }
 
 function endGame() {
-    speechSynthesis.cancel();
+    AudioManager.stopSpeaking();
+    AudioManager.stopEssay();
+    AudioManager.stopListening();
     stopLocationTracking();
     // Reset UI state
     answerActions.classList.add('hidden');
@@ -494,6 +559,69 @@ function endGame() {
 
 // Make endGame globally accessible for onclick handlers
 window.endGame = endGame;
+
+// --- Voice interaction functions ---
+
+function handleVoiceGuess(transcript) {
+    if (!transcript) return;
+    guessInput.value = transcript;
+    submitGuess();
+}
+
+function handleVoiceCommand(action, transcript) {
+    // State guards: only allow actions that make sense in current state
+    const guessVisible = !document.querySelector('.guess-container').classList.contains('hidden');
+    const answerVisible = !answerActions.classList.contains('hidden');
+    const learnMoreVisible = !learnMoreContainer.classList.contains('hidden');
+
+    switch (action) {
+        case 'hint':
+            if (guessVisible) showNextHint();
+            break;
+        case 'giveUp':
+            if (guessVisible) giveUp();
+            break;
+        case 'next':
+            if (answerVisible || learnMoreVisible) proceedToNextRound();
+            break;
+        case 'learnMore':
+            if (answerVisible) showLearnMore();
+            break;
+        case 'readAloud':
+            if (learnMoreVisible) readEssayAloud();
+            break;
+        case 'stop':
+            AudioManager.stopSpeaking();
+            AudioManager.stopEssay();
+            break;
+        case 'endGame':
+            endGame();
+            break;
+    }
+}
+
+function readEssayAloud() {
+    if (AudioManager.isEssayPlaying) {
+        AudioManager.stopEssay();
+        return;
+    }
+    const essayText = gameState.currentClue?.essay;
+    if (essayText) {
+        AudioManager.speakEssay(essayText);
+    }
+}
+
+function toggleMicForGuess() {
+    if (AudioManager.isListening) {
+        AudioManager.stopListening();
+    } else {
+        AudioManager.startListening('guess');
+    }
+}
+
+function toggleAudio() {
+    AudioManager.toggle();
+}
 
 // GPS/Location Functions
 function startLocationTracking() {

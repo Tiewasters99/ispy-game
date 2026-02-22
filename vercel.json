@@ -3,6 +3,10 @@
     "api/*.js": {
       "memory": 1024,
       "maxDuration": 10
+    },
+    "api/tts.js": {
+      "memory": 1024,
+      "maxDuration": 15
     }
   }
 }
