@@ -96,18 +96,16 @@ const AudioManager = (() => {
         console.log('[AudioManager] Initialized. Muted:', muted, '| Speech Recognition:', hasSpeechRecognition);
     }
 
-    // --- TTS (ElevenLabs primary, browser fallback) ---
+    // --- TTS (ElevenLabs only — Professor Jones voice, no browser fallback) ---
     async function speak(text) {
         if (muted || !text) return;
 
         stopSpeaking();
 
-        // Always pause recognition during TTS to prevent echo
-        const wasPaused = isPaused;
+        // Pause recognition during TTS to prevent echo
         if (isListening) {
             pauseRecognition();
         } else if (!isPaused) {
-            // Mark as paused anyway so resumeRecognition knows to restart after TTS
             isPaused = true;
         }
 
@@ -148,10 +146,12 @@ const AudioManager = (() => {
                 }
             }
         } catch (e) {
-            // Fall through to browser TTS
+            // ElevenLabs failed — no fallback, text is visible in transcript
         }
 
-        speakBrowser(text);
+        // TTS unavailable — just resume recognition so the game continues
+        isSpeaking = false;
+        resumeRecognition();
     }
 
     function speakBrowser(text) {
