@@ -134,6 +134,18 @@ async function sendToGamemaster(transcript) {
     }
 
     isProcessing = false;
+
+    // Ensure command mode stays alive for hands-free use.
+    // speak() pauses recognition; it resumes after TTS ends.
+    // But as a fallback, if recognition dies, restart it after TTS should be done.
+    if (AudioManager.hasSpeechRecognition && !AudioManager.muted && !AudioManager.isListening) {
+        // Give TTS time to finish, then ensure listening restarts
+        setTimeout(() => {
+            if (!AudioManager.isListening && !AudioManager.isSpeaking) {
+                AudioManager.startListening('command');
+            }
+        }, 5000);
+    }
 }
 
 // --- Execute structured actions from the Game Master ---

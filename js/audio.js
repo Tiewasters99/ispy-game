@@ -328,19 +328,10 @@ const AudioManager = (() => {
 
     function resumeRecognition() {
         if (isPaused && recognitionMode && !isSpeaking) {
+            const mode = recognitionMode;
             isPaused = false;
-            // Reuse existing recognition instance to avoid repeated permission prompts on mobile
-            if (recognition) {
-                try {
-                    isListening = true;
-                    recognition.start();
-                    dispatchEvent('listening-state-change', { listening: true, mode: recognitionMode });
-                    return;
-                } catch (e) {
-                    // Instance can't restart, fall through to create new one
-                }
-            }
-            startListening(recognitionMode);
+            // Always create a fresh recognition instance to get clean state
+            startListening(mode);
         }
     }
 
