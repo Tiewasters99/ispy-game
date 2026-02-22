@@ -373,6 +373,37 @@ const AudioManager = (() => {
         }
     }
 
+    // --- Unlock audio on mobile (must be called from a user gesture) ---
+    function unlock() {
+        // Unlock AudioContext
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const buffer = ctx.createBuffer(1, 1, 22050);
+            const source = ctx.createBufferSource();
+            source.buffer = buffer;
+            source.connect(ctx.destination);
+            source.start(0);
+            ctx.resume();
+        } catch (e) { /* ignore */ }
+
+        // Unlock HTML5 Audio element
+        try {
+            const a = new Audio();
+            a.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+            a.volume = 0;
+            a.play().then(() => a.pause()).catch(() => {});
+        } catch (e) { /* ignore */ }
+
+        // Unlock speechSynthesis
+        if ('speechSynthesis' in window) {
+            const u = new SpeechSynthesisUtterance('');
+            u.volume = 0;
+            speechSynthesis.speak(u);
+        }
+
+        console.log('[AudioManager] Audio unlocked via user gesture');
+    }
+
     // --- Helpers ---
     function dispatchEvent(name, detail) {
         window.dispatchEvent(new CustomEvent(name, { detail }));
@@ -386,6 +417,7 @@ const AudioManager = (() => {
     // --- Public API ---
     return {
         init,
+        unlock,
         speak,
         stopSpeaking,
         speakEssay,

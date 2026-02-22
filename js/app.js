@@ -355,6 +355,9 @@ function escapeHtml(text) {
 // --- Game Lifecycle ---
 
 function startGame() {
+    // Unlock audio on mobile — must happen synchronously in the tap handler
+    AudioManager.unlock();
+
     // Reset state
     gameState.phase = 'setup_intro';
     gameState.players = [];
