@@ -40,8 +40,14 @@ async function sendToGamemaster(transcript) {
     if (isProcessing || !transcript) return;
     isProcessing = true;
 
-    // Show thinking indicator
-    addTranscriptEntry('player', transcript);
+    // Cancel any pending silence timer — player is actively communicating
+    AudioManager.clearSilenceTimer();
+
+    // Show thinking indicator (hide internal system messages from transcript)
+    const isSystemMessage = transcript.startsWith('[');
+    if (!isSystemMessage) {
+        addTranscriptEntry('player', transcript);
+    }
     addTranscriptEntry('jones', '...', true); // thinking indicator
 
     try {
@@ -111,11 +117,12 @@ async function sendToGamemaster(transcript) {
             updateGameCreditsDisplay(data.remainingCredits);
         }
 
-        // Show Professor Jones's response in transcript
-        addTranscriptEntry('jones', data.speech);
-
-        // Speak the response
-        speak(data.speech);
+        // Show Professor Jones's response in transcript and speak it
+        // (skip if speech is empty — e.g. consecutive silence responses)
+        if (data.speech) {
+            addTranscriptEntry('jones', data.speech);
+            speak(data.speech);
+        }
 
         // Safety net: if category is set but Claude didn't generate a clue yet,
         // auto-trigger clue generation (Claude sometimes splits "let me look around..." and the actual clue)
@@ -621,10 +628,16 @@ document.addEventListener('DOMContentLoaded', () => {
     // AudioManager setup
     AudioManager.init();
 
-    // Voice callback: handle trigger words + direct speech
+    // Voice callback: handle trigger words + direct speech + silence
     AudioManager.setCallbacks({
         guess: (transcript) => handleVoiceInput(transcript),
-        command: (transcript) => handleVoiceInput(transcript)
+        command: (transcript) => handleVoiceInput(transcript),
+        silence: () => {
+            // Player stayed silent after Professor Jones spoke — auto-continue
+            if (!isProcessing) {
+                sendToGamemaster('[No response — player is silent]');
+            }
+        }
     });
 
     // Audio toggle button

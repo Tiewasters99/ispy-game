@@ -15,10 +15,13 @@ const AudioManager = (() => {
     let speechAudio = null; // persistent <audio> element for TTS (unlocked on user gesture)
     let isEssayPlaying = false;
     let isPaused = false; // true while recognition is paused for TTS playback
+    let silenceTimer = null; // timer for silence-as-send
+    let silenceEnabled = false; // set true after TTS finishes, cleared on speech or send
 
     // Callbacks set by app.js
     let onVoiceGuess = null;
     let onVoiceCommand = null;
+    let onSilence = null;
 
     // Speech Recognition availability
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -291,6 +294,9 @@ const AudioManager = (() => {
             const result = event.results[event.results.length - 1];
             const transcript = result[0].transcript.trim();
 
+            // Player is speaking — cancel silence timer
+            clearSilenceTimer();
+
             if (result.isFinal) {
                 // Both modes pass raw transcript to callback — Claude interprets everything
                 if (mode === 'guess' && onVoiceGuess) {
@@ -340,6 +346,7 @@ const AudioManager = (() => {
     function stopListening() {
         isListening = false;
         isPaused = false;
+        clearSilenceTimer();
         if (recognition) {
             try {
                 recognition.abort();
@@ -354,6 +361,7 @@ const AudioManager = (() => {
         if (recognition && isListening) {
             isPaused = true;
             isListening = false; // prevent command-mode auto-restart in onend
+            clearSilenceTimer();
             try {
                 recognition.abort();
             } catch (e) { /* ignore */ }
@@ -366,6 +374,33 @@ const AudioManager = (() => {
             isPaused = false;
             // Always create a fresh recognition instance to get clean state
             startListening(mode);
+            // Start silence timer — Professor Jones just finished speaking,
+            // so if the player says nothing, treat silence as acknowledgment
+            startSilenceTimer();
+        }
+    }
+
+    // --- Silence Detection ---
+    // After TTS finishes and recognition resumes, if no speech for ~4s,
+    // fire a silence event so the app can auto-send to gamemaster.
+    const SILENCE_TIMEOUT = 4000;
+
+    function startSilenceTimer() {
+        clearSilenceTimer();
+        silenceEnabled = true;
+        silenceTimer = setTimeout(() => {
+            if (silenceEnabled && !isSpeaking && !isPaused && onSilence) {
+                silenceEnabled = false;
+                onSilence();
+            }
+        }, SILENCE_TIMEOUT);
+    }
+
+    function clearSilenceTimer() {
+        silenceEnabled = false;
+        if (silenceTimer) {
+            clearTimeout(silenceTimer);
+            silenceTimer = null;
         }
     }
 
@@ -435,9 +470,10 @@ const AudioManager = (() => {
         window.dispatchEvent(new CustomEvent(name, { detail }));
     }
 
-    function setCallbacks({ guess, command }) {
+    function setCallbacks({ guess, command, silence }) {
         if (guess) onVoiceGuess = guess;
         if (command) onVoiceCommand = command;
+        if (silence) onSilence = silence;
     }
 
     // --- Public API ---
@@ -452,6 +488,7 @@ const AudioManager = (() => {
         stopListening,
         toggle,
         setCallbacks,
+        clearSilenceTimer,
         get muted() { return muted; },
         get isListening() { return isListening; },
         get isSpeaking() { return isSpeaking; },
