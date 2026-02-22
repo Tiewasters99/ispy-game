@@ -230,7 +230,7 @@ Location: ${locationContext || 'Unknown'}
                 'anthropic-version': '2023-06-01'
             },
             body: JSON.stringify({
-                model: 'claude-haiku-3-5-20241022',
+                model: 'claude-3-5-sonnet-20241022',
                 max_tokens: 2048,
                 system: SYSTEM_PROMPT,
                 messages: messages
