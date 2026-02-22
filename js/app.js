@@ -105,7 +105,10 @@ async function sendToGamemaster(transcript) {
             gameState.conversationHistory = gameState.conversationHistory.slice(-40);
         }
 
-        // Execute all actions
+        // Start TTS fetch IMMEDIATELY — runs in parallel with action processing
+        const ttsPromise = data.speech ? AudioManager.prefetchAudio(data.speech) : null;
+
+        // Execute all actions (while TTS is fetching)
         if (data.actions && Array.isArray(data.actions)) {
             for (const action of data.actions) {
                 executeAction(action);
@@ -117,11 +120,10 @@ async function sendToGamemaster(transcript) {
             updateGameCreditsDisplay(data.remainingCredits);
         }
 
-        // Show Professor Jones's response in transcript and speak it
-        // (skip if speech is empty — e.g. consecutive silence responses)
+        // Show Professor Jones's response in transcript and play pre-fetched audio
         if (data.speech) {
             addTranscriptEntry('jones', data.speech);
-            speak(data.speech);
+            AudioManager.playPrefetched(ttsPromise);
         }
 
         // Safety net: if category is set but Claude didn't generate a clue yet,

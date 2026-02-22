@@ -190,6 +190,63 @@ const AudioManager = (() => {
         speechSynthesis.speak(utterance);
     }
 
+    // --- Pre-fetch TTS (starts fetch in parallel with action processing) ---
+    function prefetchAudio(text) {
+        if (muted || !text) return Promise.resolve(null);
+
+        return fetch('/api/tts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text })
+        }).then(response => {
+            if (response.ok) {
+                const contentType = response.headers.get('content-type');
+                if (contentType && contentType.includes('audio')) {
+                    return response.blob();
+                }
+            }
+            return null;
+        }).catch(() => null);
+    }
+
+    async function playPrefetched(blobPromise) {
+        stopSpeaking();
+
+        if (isListening) {
+            pauseRecognition();
+        } else if (!isPaused) {
+            isPaused = true;
+        }
+
+        try {
+            const blob = await blobPromise;
+            if (!blob) {
+                isSpeaking = false;
+                resumeRecognition();
+                return;
+            }
+
+            const audioUrl = URL.createObjectURL(blob);
+            const audio = speechAudio || new Audio();
+            audio.onended = () => {
+                isSpeaking = false;
+                URL.revokeObjectURL(audioUrl);
+                resumeRecognition();
+            };
+            audio.onerror = () => {
+                isSpeaking = false;
+                URL.revokeObjectURL(audioUrl);
+                resumeRecognition();
+            };
+            audio.src = audioUrl;
+            isSpeaking = true;
+            await audio.play();
+        } catch (e) {
+            isSpeaking = false;
+            resumeRecognition();
+        }
+    }
+
     function stopSpeaking() {
         if (speechAudio) {
             speechAudio.pause();
@@ -481,6 +538,8 @@ const AudioManager = (() => {
         init,
         unlock,
         speak,
+        prefetchAudio,
+        playPrefetched,
         stopSpeaking,
         speakEssay,
         stopEssay,
