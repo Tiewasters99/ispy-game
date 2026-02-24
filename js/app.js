@@ -638,6 +638,27 @@ function handleVoiceInput(transcript) {
 
     const trimmed = transcript.trim();
 
+    // RESET — emergency stop, back to beginning
+    if (/^reset$/i.test(trimmed)) {
+        isProcessing = false;
+        pendingTranscript = null;
+        AudioManager.stopSpeaking();
+        AudioManager.clearSilenceTimer();
+        removeThinkingIndicator();
+        resetGame();
+        return;
+    }
+
+    // WAIT — stop talking, listen to the player
+    if (/^wait$/i.test(trimmed)) {
+        AudioManager.stopSpeaking();
+        AudioManager.clearSilenceTimer();
+        pendingTranscript = null;
+        // If still processing a previous request, let it finish but don't speak
+        sendToGamemaster('[Player said WAIT. Stop immediately. Say something brief like "Sorry, go ahead" or "I\'m listening" and then WAIT for them to speak. Do NOT continue what you were saying. Do NOT offer hints or move the game forward. Just listen.]');
+        return;
+    }
+
     // If it's a trigger word and there's text in the input, send the input text
     if (TRIGGER_WORDS.test(trimmed)) {
         const textInput = document.getElementById('text-input');
@@ -647,8 +668,6 @@ function handleVoiceInput(transcript) {
             sendToGamemaster(text);
             return;
         }
-        // No text in input — treat trigger word as speech to Professor Jones
-        // (e.g., "go" might mean "go ahead", "start" might mean "start the game")
     }
 
     // Otherwise send the spoken words directly to the gamemaster
