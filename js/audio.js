@@ -106,11 +106,9 @@ const AudioManager = (() => {
 
         stopSpeaking();
 
-        // Pause recognition during TTS to prevent echo
-        if (isListening) {
-            pauseRecognition();
-        } else if (!isPaused) {
-            isPaused = true;
+        // Keep recognition running during TTS — player can interrupt
+        if (!isListening && !muted && hasSpeechRecognition && recognitionMode) {
+            startListening(recognitionMode);
         }
 
         try {
@@ -136,12 +134,12 @@ const AudioManager = (() => {
                     audio.onended = () => {
                         isSpeaking = false;
                         URL.revokeObjectURL(audioUrl);
-                        resumeRecognition();
+                        startSilenceTimer();
                     };
                     audio.onerror = () => {
                         isSpeaking = false;
                         URL.revokeObjectURL(audioUrl);
-                        resumeRecognition();
+                        startSilenceTimer();
                     };
                     audio.src = audioUrl;
                     isSpeaking = true;
@@ -154,9 +152,9 @@ const AudioManager = (() => {
             // ElevenLabs failed — no fallback, text is visible in transcript
         }
 
-        // TTS unavailable — just resume recognition so the game continues
+        // TTS unavailable — just start silence timer so the game continues
         isSpeaking = false;
-        resumeRecognition();
+        startSilenceTimer();
     }
 
     function speakBrowser(text) {
@@ -212,17 +210,17 @@ const AudioManager = (() => {
     async function playPrefetched(blobPromise) {
         stopSpeaking();
 
-        if (isListening) {
-            pauseRecognition();
-        } else if (!isPaused) {
-            isPaused = true;
+        // Keep recognition running during TTS — player can interrupt
+        // Only start recognition if not already listening
+        if (!isListening && !muted && hasSpeechRecognition && recognitionMode) {
+            startListening(recognitionMode);
         }
 
         try {
             const blob = await blobPromise;
             if (!blob) {
                 isSpeaking = false;
-                resumeRecognition();
+                startSilenceTimer();
                 return;
             }
 
@@ -231,19 +229,19 @@ const AudioManager = (() => {
             audio.onended = () => {
                 isSpeaking = false;
                 URL.revokeObjectURL(audioUrl);
-                resumeRecognition();
+                startSilenceTimer();
             };
             audio.onerror = () => {
                 isSpeaking = false;
                 URL.revokeObjectURL(audioUrl);
-                resumeRecognition();
+                startSilenceTimer();
             };
             audio.src = audioUrl;
             isSpeaking = true;
             await audio.play();
         } catch (e) {
             isSpeaking = false;
-            resumeRecognition();
+            startSilenceTimer();
         }
     }
 
@@ -354,6 +352,11 @@ const AudioManager = (() => {
             // Player is speaking — cancel silence timer
             clearSilenceTimer();
 
+            // If Jones is talking and the player starts speaking, interrupt him
+            if (isSpeaking && transcript.length > 0) {
+                stopSpeaking();
+            }
+
             if (result.isFinal) {
                 // Both modes pass raw transcript to callback — Claude interprets everything
                 if (mode === 'guess' && onVoiceGuess) {
@@ -440,7 +443,7 @@ const AudioManager = (() => {
     // --- Silence Detection ---
     // After TTS finishes and recognition resumes, if no speech for ~4s,
     // fire a silence event so the app can auto-send to gamemaster.
-    const SILENCE_TIMEOUT = 3000;
+    const SILENCE_TIMEOUT = 8000;
 
     function startSilenceTimer() {
         clearSilenceTimer();

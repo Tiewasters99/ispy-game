@@ -61,7 +61,7 @@ async function callGamemaster(transcript) {
                         region: gameState.location.region
                     }
                 },
-                conversationHistory: gameState.conversationHistory.slice(-20),
+                conversationHistory: gameState.conversationHistory.slice(-12),
                 transcript: transcript
             })
         });
@@ -137,9 +137,9 @@ async function sendToGamemaster(transcript) {
         gameState.conversationHistory.push({ role: 'assistant', content: data.speech });
     }
 
-    // Trim history to last 20 messages (10 exchanges)
-    if (gameState.conversationHistory.length > 20) {
-        gameState.conversationHistory = gameState.conversationHistory.slice(-20);
+    // Trim history to last 12 messages (6 exchanges)
+    if (gameState.conversationHistory.length > 12) {
+        gameState.conversationHistory = gameState.conversationHistory.slice(-12);
     }
 
     // Start TTS fetch IMMEDIATELY — runs in parallel with action processing
@@ -687,9 +687,7 @@ function startHeartbeat() {
         if (gameActive &&
             AudioManager.hasSpeechRecognition &&
             !AudioManager.muted &&
-            !AudioManager.isListening &&
-            !AudioManager.isSpeaking &&
-            !isProcessing) {
+            !AudioManager.isListening) {
             console.log('[Heartbeat] Recognition died, restarting command mode');
             AudioManager.startListening('command');
         }
