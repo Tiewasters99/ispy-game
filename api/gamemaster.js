@@ -3,6 +3,7 @@
 // Receives full game state + conversation history + latest transcript
 // Returns Professor Jones's speech + structured game actions
 
+import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@supabase/supabase-js';
 
 const SYSTEM_PROMPT = `You ARE Professor Jones — bailed on academia, rides along on road trips because the world is funnier than any syllabus.
@@ -130,32 +131,43 @@ Location: ${locationContext || 'Unknown'}
         content: stateDescription
     });
 
+    // --- Stream Claude response, send speech to client as soon as it's ready ---
+    const client = new Anthropic({ apiKey });
+
     try {
-        const response = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': apiKey,
-                'anthropic-version': '2023-06-01'
-            },
-            body: JSON.stringify({
-                model: 'claude-sonnet-4-20250514',
-                max_tokens: 512,
-                system: SYSTEM_PROMPT,
-                messages: messages
-            })
+        const stream = client.messages.stream({
+            model: 'claude-sonnet-4-20250514',
+            max_tokens: 512,
+            system: SYSTEM_PROMPT,
+            messages: messages
         });
 
-        if (!response.ok) {
-            const errorData = await response.text();
-            console.error('Claude API error:', errorData);
-            return res.status(response.status).json({ error: 'Claude API error' });
-        }
+        // Accumulate text from stream events, extract speech early
+        let accumulated = '';
+        let speechSent = false;
 
-        const data = await response.json();
-        const content = data.content[0].text;
+        // Set NDJSON headers — we'll send speech line first, then complete line
+        res.setHeader('Content-Type', 'application/x-ndjson');
+        res.setHeader('Cache-Control', 'no-cache');
 
-        // Parse JSON response — try direct parse, then regex fallback
+        stream.on('text', (text) => {
+            accumulated += text;
+
+            // Try to extract speech early (before full JSON is ready)
+            if (!speechSent) {
+                const speech = extractSpeech(accumulated);
+                if (speech !== null) {
+                    speechSent = true;
+                    res.write(JSON.stringify({ type: 'speech', speech }) + '\n');
+                }
+            }
+        });
+
+        // Wait for stream to finish
+        const message = await stream.finalMessage();
+        const content = message.content[0].text;
+
+        // Parse the full JSON response
         let parsed;
         try {
             parsed = JSON.parse(content);
@@ -166,31 +178,61 @@ Location: ${locationContext || 'Unknown'}
                     parsed = JSON.parse(jsonMatch[0]);
                 } catch (e2) {
                     console.error('Failed to parse Claude response:', content);
-                    return res.status(500).json({
-                        error: 'Failed to parse response',
+                    res.write(JSON.stringify({
+                        type: 'error',
                         speech: "Sorry, I lost my train of thought. Say that again?",
                         actions: [{ type: 'no_action' }]
-                    });
+                    }) + '\n');
+                    return res.end();
                 }
             } else {
-                parsed = {
-                    speech: content,
-                    actions: [{ type: 'no_action' }]
-                };
+                parsed = { speech: content, actions: [{ type: 'no_action' }] };
             }
         }
 
-        return res.status(200).json({
+        // Send complete response
+        res.write(JSON.stringify({
+            type: 'complete',
             speech: parsed.speech || '',
             actions: parsed.actions || [{ type: 'no_action' }],
             remainingCredits
-        });
+        }) + '\n');
+        return res.end();
     } catch (error) {
         console.error('Gamemaster error:', error);
-        return res.status(500).json({
-            error: 'Failed to process',
+        // If headers not yet sent, use normal JSON error
+        if (!res.headersSent) {
+            return res.status(500).json({
+                error: 'Failed to process',
+                speech: "Sorry, I lost my train of thought. Say that again?",
+                actions: [{ type: 'no_action' }]
+            });
+        }
+        // Headers already sent (mid-stream error) — send NDJSON error line
+        res.write(JSON.stringify({
+            type: 'error',
             speech: "Sorry, I lost my train of thought. Say that again?",
             actions: [{ type: 'no_action' }]
-        });
+        }) + '\n');
+        return res.end();
     }
+}
+
+/**
+ * Extract "speech" value from partially-streamed JSON.
+ */
+function extractSpeech(text) {
+    const match = text.match(/"speech"\s*:\s*"/);
+    if (!match) return null;
+    let i = match.index + match[0].length;
+    while (i < text.length) {
+        if (text[i] === '\\') { i += 2; continue; }
+        if (text[i] === '"') {
+            try {
+                return JSON.parse('"' + text.substring(match.index + match[0].length, i) + '"');
+            } catch { return null; }
+        }
+        i++;
+    }
+    return null;
 }

@@ -38,7 +38,7 @@ const gameScreen = document.getElementById('game-screen');
 
 let retryCount = 0;
 
-async function callGamemaster(transcript) {
+async function callGamemaster(transcript, onSpeech) {
     try {
         const user = typeof supabase !== 'undefined' ? supabase.auth.getUser() : null;
 
@@ -72,25 +72,43 @@ async function callGamemaster(transcript) {
         }
 
         if (!response.ok) {
-            // Auto-retry once on server error
             if (retryCount < 1) {
                 retryCount++;
-                console.warn('[Gamemaster] Request failed, retrying...', response.status);
-                return callGamemaster(transcript);
+                return callGamemaster(transcript, onSpeech);
             }
-            console.error('[Gamemaster] Failed after retry:', response.status);
             return null;
         }
 
-        return await response.json();
+        // Parse NDJSON: read full body, split lines, process each
+        const text = await response.text();
+        const lines = text.trim().split('\n');
+        let completeData = null;
+
+        for (const line of lines) {
+            if (!line.trim()) continue;
+            let msg;
+            try { msg = JSON.parse(line); } catch { continue; }
+
+            if (msg.type === 'speech' && onSpeech) {
+                onSpeech(msg.speech);
+            } else if (msg.type === 'complete') {
+                completeData = msg;
+            } else if (msg.type === 'error') {
+                // Error with fallback speech — treat as data
+                if (msg.speech) return msg;
+                return null;
+            } else if (msg.speech && msg.actions) {
+                // Plain JSON fallback (non-NDJSON error response)
+                completeData = msg;
+            }
+        }
+
+        return completeData;
     } catch (error) {
-        // Auto-retry once on network error
         if (retryCount < 1) {
             retryCount++;
-            console.warn('[Gamemaster] Network error, retrying...', error);
-            return callGamemaster(transcript);
+            return callGamemaster(transcript, onSpeech);
         }
-        console.error('[Gamemaster] Failed after retry:', error);
         return null;
     }
 }
@@ -120,45 +138,47 @@ async function sendToGamemaster(transcript) {
         addTranscriptEntry('jones', '...', true); // thinking indicator
     }
 
-    const data = await callGamemaster(transcript);
+    let ttsPromise = null;
+    let speechHandled = false;
+
+    const data = await callGamemaster(transcript, (speech) => {
+        speechHandled = true;
+        ttsPromise = AudioManager.prefetchAudio(speech);
+        AudioManager.playPrefetched(ttsPromise);
+        addTranscriptEntry('jones', speech);
+        removeThinkingIndicator();
+    });
+
     if (!data) {
         removeThinkingIndicator();
         isProcessing = false;
         return;
     }
 
-    // Remove thinking indicator
     removeThinkingIndicator();
     retryCount = 0;
 
-    // Update conversation history
     gameState.conversationHistory.push({ role: 'user', content: transcript });
     if (data.speech) {
         gameState.conversationHistory.push({ role: 'assistant', content: data.speech });
     }
-
-    // Trim history to last 12 messages (6 exchanges)
     if (gameState.conversationHistory.length > 12) {
         gameState.conversationHistory = gameState.conversationHistory.slice(-12);
     }
 
-    // Start TTS fetch IMMEDIATELY — runs in parallel with action processing
-    const ttsPromise = data.speech ? AudioManager.prefetchAudio(data.speech) : null;
-
-    // Execute all actions (while TTS is fetching)
     if (data.actions && Array.isArray(data.actions)) {
         for (const action of data.actions) {
             executeAction(action);
         }
     }
 
-    // Update credits display
     if (data.remainingCredits !== null && data.remainingCredits !== undefined) {
         updateGameCreditsDisplay(data.remainingCredits);
     }
 
-    // Show Professor Jones's response in transcript and play pre-fetched audio
-    if (data.speech) {
+    // If speech callback didn't fire (edge case), play now
+    if (data.speech && !speechHandled) {
+        ttsPromise = AudioManager.prefetchAudio(data.speech);
         addTranscriptEntry('jones', data.speech);
         AudioManager.playPrefetched(ttsPromise);
     }
