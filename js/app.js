@@ -79,37 +79,50 @@ async function callGamemaster(transcript, onSpeech) {
             return null;
         }
 
-        // Stream NDJSON: process each line as it arrives so speech plays immediately
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
+        // Parse NDJSON lines, processing speech as early as possible
         let completeData = null;
 
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
+        function processLine(line) {
+            line = line.trim();
+            if (!line) return;
+            let msg;
+            try { msg = JSON.parse(line); } catch { return; }
 
-            // Process all complete lines in the buffer
-            let newlineIdx;
-            while ((newlineIdx = buffer.indexOf('\n')) !== -1) {
-                const line = buffer.slice(0, newlineIdx).trim();
-                buffer = buffer.slice(newlineIdx + 1);
-                if (!line) continue;
+            if (msg.type === 'speech' && onSpeech) {
+                onSpeech(msg.speech);
+            } else if (msg.type === 'complete') {
+                completeData = msg;
+            } else if (msg.type === 'error') {
+                completeData = msg.speech ? msg : null;
+            } else if (msg.speech && msg.actions) {
+                completeData = msg;
+            }
+        }
 
-                let msg;
-                try { msg = JSON.parse(line); } catch { continue; }
+        // Try streaming for faster speech playback, fall back to buffered read
+        if (response.body && response.body.getReader) {
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
 
-                if (msg.type === 'speech' && onSpeech) {
-                    onSpeech(msg.speech);
-                } else if (msg.type === 'complete') {
-                    completeData = msg;
-                } else if (msg.type === 'error') {
-                    if (msg.speech) return msg;
-                    return null;
-                } else if (msg.speech && msg.actions) {
-                    completeData = msg;
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+
+                let newlineIdx;
+                while ((newlineIdx = buffer.indexOf('\n')) !== -1) {
+                    processLine(buffer.slice(0, newlineIdx));
+                    buffer = buffer.slice(newlineIdx + 1);
                 }
+            }
+            // Process any remaining data in the buffer
+            if (buffer.trim()) processLine(buffer);
+        } else {
+            // Fallback: read entire response at once
+            const text = await response.text();
+            for (const line of text.trim().split('\n')) {
+                processLine(line);
             }
         }
 
