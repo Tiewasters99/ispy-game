@@ -442,6 +442,9 @@ function escapeHtml(text) {
 // --- Game Lifecycle ---
 
 function startGame() {
+    // Ensure audio is ON — clear any stale muted state from previous sessions
+    if (AudioManager.muted) AudioManager.toggle();
+
     // Unlock audio on mobile — must happen synchronously in the tap handler
     AudioManager.unlock();
 
@@ -579,7 +582,12 @@ function toggleMicForGuess() {
 }
 
 function toggleAudio() {
+    const wasOn = !AudioManager.muted;
     AudioManager.toggle();
+    // If we just unmuted, restart speech recognition
+    if (wasOn === false && !AudioManager.muted && AudioManager.hasSpeechRecognition) {
+        AudioManager.startListening('command');
+    }
 }
 
 function readEssayAloud() {
