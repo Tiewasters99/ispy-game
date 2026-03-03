@@ -79,27 +79,37 @@ async function callGamemaster(transcript, onSpeech) {
             return null;
         }
 
-        // Parse NDJSON: read full body, split lines, process each
-        const text = await response.text();
-        const lines = text.trim().split('\n');
+        // Stream NDJSON: process each line as it arrives so speech plays immediately
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
         let completeData = null;
 
-        for (const line of lines) {
-            if (!line.trim()) continue;
-            let msg;
-            try { msg = JSON.parse(line); } catch { continue; }
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
 
-            if (msg.type === 'speech' && onSpeech) {
-                onSpeech(msg.speech);
-            } else if (msg.type === 'complete') {
-                completeData = msg;
-            } else if (msg.type === 'error') {
-                // Error with fallback speech — treat as data
-                if (msg.speech) return msg;
-                return null;
-            } else if (msg.speech && msg.actions) {
-                // Plain JSON fallback (non-NDJSON error response)
-                completeData = msg;
+            // Process all complete lines in the buffer
+            let newlineIdx;
+            while ((newlineIdx = buffer.indexOf('\n')) !== -1) {
+                const line = buffer.slice(0, newlineIdx).trim();
+                buffer = buffer.slice(newlineIdx + 1);
+                if (!line) continue;
+
+                let msg;
+                try { msg = JSON.parse(line); } catch { continue; }
+
+                if (msg.type === 'speech' && onSpeech) {
+                    onSpeech(msg.speech);
+                } else if (msg.type === 'complete') {
+                    completeData = msg;
+                } else if (msg.type === 'error') {
+                    if (msg.speech) return msg;
+                    return null;
+                } else if (msg.speech && msg.actions) {
+                    completeData = msg;
+                }
             }
         }
 
