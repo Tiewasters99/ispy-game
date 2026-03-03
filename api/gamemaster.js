@@ -141,7 +141,7 @@ Location: ${locationContext || 'Unknown'}
     try {
         const stream = client.messages.stream({
             model: 'claude-3-5-haiku-20241022',
-            max_tokens: 512,
+            max_tokens: 1024,
             system: SYSTEM_PROMPT,
             messages: messages
         });

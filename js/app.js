@@ -42,9 +42,13 @@ async function callGamemaster(transcript, onSpeech) {
     try {
         const user = typeof supabase !== 'undefined' ? supabase.auth.getUser() : null;
 
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 30000);
+
         const response = await fetch('/api/gamemaster', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            signal: controller.signal,
             body: JSON.stringify({
                 userId: user?.id || null,
                 gameState: {
@@ -65,6 +69,8 @@ async function callGamemaster(transcript, onSpeech) {
                 transcript: transcript
             })
         });
+
+        clearTimeout(timeout);
 
         if (response.status === 402) {
             showOutOfCredits();
@@ -154,6 +160,15 @@ async function sendToGamemaster(transcript) {
     }
     isProcessing = true;
 
+    // Safety net: if isProcessing is still true after 35 seconds, force reset
+    const safetyTimeout = setTimeout(() => {
+        if (isProcessing) {
+            console.warn('[Game] Safety reset: isProcessing stuck, forcing reset');
+            isProcessing = false;
+            removeThinkingIndicator();
+        }
+    }, 35000);
+
     // Show thinking indicator (hide internal system messages from transcript)
     const isSystemMessage = transcript.startsWith('[');
     if (!isSystemMessage) {
@@ -171,6 +186,8 @@ async function sendToGamemaster(transcript) {
         addTranscriptEntry('jones', speech);
         removeThinkingIndicator();
     });
+
+    clearTimeout(safetyTimeout);
 
     if (!data) {
         removeThinkingIndicator();
