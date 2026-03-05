@@ -15,7 +15,8 @@ let gameState = {
         hintsRevealed: 0,
         proximity: null,
         nearbyLocation: null,
-        essay: null
+        essay: null,
+        guessValidated: false // true when validateGuess() confirmed a correct answer this round
     },
     conversationHistory: [],
     previousAnswers: [], // all answers from this session, to prevent repeats
@@ -215,10 +216,11 @@ async function sendToGamemaster(transcript) {
 
     // --- Deterministic guess check: annotate transcript if guess matches ---
     let annotatedTranscript = transcript;
-    if (!isSystemMessage && gameState.phase === 'playing' && gameState.currentRound?.answer) {
+    if (!isSystemMessage && gameState.phase === 'playing' && gameState.currentRound?.answer && !gameState.currentRound.guessValidated) {
         const result = validateGuess(transcript, gameState.currentRound.answer);
         if (result.correct) {
-            annotatedTranscript = `${transcript}\n[SYSTEM: The guess "${transcript}" is CORRECT — it matches "${gameState.currentRound.answer}". Celebrate, award the point with correct_guess, then ask if they have questions about the answer before moving on.]`;
+            gameState.currentRound.guessValidated = true;
+            annotatedTranscript = `${transcript}\n[SYSTEM: The guess "${transcript}" is CORRECT — it matches "${gameState.currentRound.answer}". Celebrate, award the point with correct_guess (identify which player said it), then ask if they have questions about the answer before moving on.]`;
         }
     }
 
@@ -361,7 +363,8 @@ function executeAction(action) {
                 hintsRevealed: 0,
                 proximity: action.proximity || 'region',
                 nearbyLocation: action.nearbyLocation || null,
-                essay: action.essay || null
+                essay: action.essay || null,
+                guessValidated: false
             };
             // Track this answer so we never repeat it
             if (answer && !gameState.previousAnswers.includes(answer)) {
@@ -372,6 +375,12 @@ function executeAction(action) {
         }
 
         case 'correct_guess': {
+            // Only award points if validateGuess() confirmed the answer in code.
+            // This prevents Claude from awarding points for wrong answers.
+            if (!gameState.currentRound.guessValidated) {
+                console.warn('[Game] correct_guess blocked — validateGuess did not confirm this answer');
+                break;
+            }
             const player = gameState.players.find(p =>
                 p.name.toLowerCase() === (action.player || '').toLowerCase()
             );
@@ -584,7 +593,8 @@ function startGame() {
     gameState.difficulty = null;
     gameState.currentRound = {
         letter: null, answer: null, hints: [], hintsRevealed: 0,
-        proximity: null, nearbyLocation: null, essay: null
+        proximity: null, nearbyLocation: null, essay: null,
+        guessValidated: false
     };
     gameState.conversationHistory = [];
     gameState.previousAnswers = [];
