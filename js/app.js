@@ -32,6 +32,37 @@ let gameState = {
 
 let isProcessing = false;
 
+// --- Deterministic Guess Validation ---
+// Checks player guesses against the current answer in code, so Claude can't
+// accept wrong answers or reject correct ones.
+
+function validateGuess(guess, correctAnswer) {
+    const normalize = s => s.toLowerCase().trim().replace(/[^a-z0-9\s]/g, '');
+    const g = normalize(guess);
+    const a = normalize(correctAnswer);
+
+    if (!g || !a) return { correct: false };
+
+    // Exact match
+    if (g === a) return { correct: true, reason: 'exact' };
+
+    // Handle common articles ("the selma march" vs "selma march")
+    const stripped = a.replace(/^(the|a|an)\s+/i, '');
+    if (g === normalize(stripped)) return { correct: true, reason: 'article_stripped' };
+
+    // Guess without articles matching answer without articles
+    const gStripped = g.replace(/^(the|a|an)\s+/i, '');
+    if (gStripped === normalize(stripped)) return { correct: true, reason: 'article_stripped' };
+
+    // For multi-word answers: all key words (>3 chars) present in guess
+    const keyWords = normalize(stripped).split(/\s+/).filter(w => w.length > 3);
+    if (keyWords.length > 1 && keyWords.every(w => g.includes(w))) {
+        return { correct: true, reason: 'all_keywords' };
+    }
+
+    return { correct: false };
+}
+
 // DOM Elements
 const setupScreen = document.getElementById('setup-screen');
 const gameScreen = document.getElementById('game-screen');
@@ -181,6 +212,16 @@ async function sendToGamemaster(transcript) {
     if (!isSystemMessage) {
         addTranscriptEntry('player', transcript);
     }
+
+    // --- Deterministic guess check: annotate transcript if guess matches ---
+    let annotatedTranscript = transcript;
+    if (!isSystemMessage && gameState.phase === 'playing' && gameState.currentRound?.answer) {
+        const result = validateGuess(transcript, gameState.currentRound.answer);
+        if (result.correct) {
+            annotatedTranscript = `${transcript}\n[SYSTEM: The guess "${transcript}" is CORRECT — it matches "${gameState.currentRound.answer}". Celebrate, award the point with correct_guess, then ask if they have questions about the answer before moving on.]`;
+        }
+    }
+
     // Always show thinking indicator — even for system messages, so the UI never looks dead
     addTranscriptEntry('jones', '...', true);
 
@@ -189,7 +230,7 @@ async function sendToGamemaster(transcript) {
 
     let data;
     try {
-        data = await callGamemaster(transcript, (speech) => {
+        data = await callGamemaster(annotatedTranscript, (speech) => {
             speechHandled = true;
             ttsPromise = AudioManager.prefetchAudio(speech);
             // Fire-and-forget — don't let TTS failures block the processing pipeline
@@ -227,6 +268,7 @@ async function sendToGamemaster(transcript) {
     removeThinkingIndicator();
     retryCount = 0;
 
+    // Store original transcript in history, not the annotated version
     gameState.conversationHistory.push({ role: 'user', content: transcript });
     if (data.speech) {
         gameState.conversationHistory.push({ role: 'assistant', content: data.speech });
