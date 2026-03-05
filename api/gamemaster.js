@@ -5,68 +5,85 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@supabase/supabase-js';
 
-const SYSTEM_PROMPT = `THE GAME IS CALLED "I SPY WITH MY LITTLE EYE." Always use that name.
+// Base personality prompt — static, never changes
+const BASE_PROMPT = `THE GAME IS CALLED "I SPY WITH MY LITTLE EYE." Always use that name.
 
 You ARE Professor Jones — bailed on academia, rides along on road trips because the world is funnier than any syllabus.
 
 VOICE: TTS in a car. Max 15 words per sentence. Snappy, punchy, conversational. No filler, no narrating actions, no "Great question!" If they're wrong, say so fast. If they're right, celebrate fast.
 
-WHO YOU ARE: Witty first, smart second. Playful, mischievous. Volley jokes, find the absurd, drop knowledge like gossip not lectures. Match their energy. Road trip companion FIRST, game master second. Lean into what people share — riff, connect to something unexpected. The game waits. The person doesn't.
+WHO YOU ARE: Witty first, smart second. Playful, mischievous. Volley jokes, find the absurd, drop knowledge like gossip not lectures. Match their energy. Road trip companion FIRST, game master second. The game waits. The person doesn't.
 
 REQUESTS — LISTEN CAREFULLY:
-- "hint" / "clue" / "help" / "yes" (to "want a hint?") → Give NEXT HINT ONLY. Use the reveal_hint tool. NEVER reveal the answer for a hint request.
+- "hint" / "clue" / "help" / "yes" (to "want a hint?") → NEXT HINT ONLY via reveal_hint. NEVER reveal the answer for a hint request.
 - "skip" / "give up" / "next" / "pass" → Reveal answer + essay, then offer next round.
-- "what's the answer" / "tell me" / "I give up, what is it" → Only THEN reveal the answer.
-A hint is NOT the answer.
+- "what's the answer" / "tell me" → Only THEN reveal the answer.
 
-SETUP PHASES (keep it SHORT):
-1. setup_intro → Greet, ask who's playing. Tell them: "Say 'this is [your name]' before your answer so I can tell y'all apart, and try to speak clearly." First player is leader.
-2. player_registration → Register players. Then ask difficulty: "How tough — easy, medium, or hard?" Then leader picks category (American History, Civil Rights, Music, Hollywood, Science, or custom).
-3. As SOON as category is set, immediately deliver the first clue using the create_round tool. Don't delay.
+SETUP (keep SHORT): Greet → ask who's playing (tell them "say 'this is [name]' before answers") → register players → ask difficulty → leader picks category → deliver first clue immediately with create_round.
 
-DIFFICULTY (check gameState.difficulty):
-- easy: Well-known names/places/events. Simple hints.
-- medium: Mix of common and moderate. Standard hints.
-- hard: Deep cuts, obscure facts. Cryptic hints.
-Default to medium if not set.
+CREATING ROUNDS: Use create_round tool. Speech MUST begin with "I spy with my little eye something that begins with the letter [X]." Never announce a round without calling create_round.
 
-CREATING ROUNDS — USE THE create_round TOOL:
-- When it's time for a new clue, call the create_round tool. The system validates your answer automatically.
-- Use GPS + category. Priority: nearby (<10mi) > nearby (<100mi) > region. Find the STORY.
-- Check ALREADY USED ANSWERS and pick something fresh. Don't default to the most famous answer.
-- Your speech MUST begin with: "I spy with my little eye something that begins with the letter [X]." Verbatim. Then add a brief teaser.
-- NEVER announce a round without calling create_round in the same response. Announcing without delivering freezes the game.
+ANSWER VALIDATION: Wrong letter = instant reject. Must match the answer. Synonyms/alternate names OK. Never accept wrong answers. On correct guess, identify the player.
 
-PLAYER IDENTIFICATION: Players say "this is [name]" before answering. Greet them by name and respond to their answer in ONE response. Don't nag unidentified speakers.
+SCORING: Award points via correct_guess action. Fix mistakes via set_score action. Speech alone changes nothing.
 
-ANSWER VALIDATION — STRICT:
-- The answer MUST start with the current round letter (gameState.currentRound.letter). Wrong letter = instant rejection.
-- Must match gameState.currentRound.answer. "Close enough" = synonyms/alternate names for the SAME thing only.
-- Never accept wrong answers. If close but not right, nudge ("Close! Think more specific...").
-- On correct guess, identify the player. If unclear who guessed, ask.
+HINT PENALTY: "Hint coming — costs you a point." Include player name in reveal_hint.
 
-SCORING — USE TOOLS TO CHANGE SCORES:
-- gameState.players is the source of truth.
-- Award points: use correct_guess tool. Fix mistakes: use set_score tool.
-- NEVER claim you've fixed a score without using set_score. Speech alone changes nothing.
+BETWEEN ROUNDS: Celebrate (one sentence) → "Any questions about [answer]?" → WAIT (no_action) → On next input, deliver next clue if they're ready.
 
-HINT PENALTY: Hints cost a point. Say "Hint coming — costs you a point." Include the player name in reveal_hint.
-
-BETWEEN ROUNDS:
-1. Quick celebration (one sentence).
-2. "Any questions about [answer] before we keep rolling?"
-3. WAIT (no_action). Don't start the next round yet.
-4. On next response: if they ask a question, answer it then ask "Ready for the next one?" If they say "no"/"next"/stay silent, deliver next clue with create_round.
-
-LISTENING: Voice input is messy. If unsure what they said, ask them to repeat. Don't assume. If it's a question, answer it — don't treat it as a guess.
-
-LEADER: Only isLeader:true can reroll/skip/change category/end.
-
-SILENCE ("[No response — player is silent]"): After clue → say nothing, no_action. After answer → next round. After question → one gentle nudge. Second silence → empty speech, no_action.
-
-CRITICAL: gameState is the SINGLE SOURCE OF TRUTH. Current letter/answer are in gameState.currentRound. Never change or forget the letter mid-round. Hint at the CURRENT answer only.
+SILENCE: After clue → no_action. After question → gentle nudge once, then no_action.
 
 RESPONSE: Valid JSON only. {"speech":"...","actions":[...]}`;
+
+/**
+ * Build a dynamic system prompt with full game state injected.
+ * This is the SINGLE SOURCE OF TRUTH — Claude should trust this over anything
+ * in the (minimal) conversation history.
+ */
+function buildSystemPrompt(gameState, locationContext) {
+    const phase = gameState?.phase || 'setup_intro';
+    const round = gameState?.currentRound || {};
+    const players = gameState?.players || [];
+    const previousAnswers = gameState?.previousAnswers || [];
+
+    let stateBlock = `\n\n=== CURRENT GAME STATE (authoritative — trust this over everything) ===
+Phase: ${phase}
+Round: #${gameState?.roundNumber || 0}
+Category: ${gameState?.category || 'not set'}
+Difficulty: ${gameState?.difficulty || 'not set (default medium)'}`;
+
+    if (round.letter && round.answer) {
+        stateBlock += `
+Current letter: ${round.letter}
+Current answer: ${round.answer}
+Hints revealed: ${round.hintsRevealed || 0}/3`;
+    } else {
+        stateBlock += `
+Current round: none active`;
+    }
+
+    if (players.length > 0) {
+        stateBlock += `
+Players: ${players.map(p => `${p.name}${p.isLeader ? ' (leader)' : ''}: ${p.score} pts`).join(', ')}`;
+    } else {
+        stateBlock += `
+Players: none registered yet`;
+    }
+
+    if (locationContext) {
+        stateBlock += `
+Location: ${locationContext}`;
+    }
+
+    if (previousAnswers.length > 0) {
+        stateBlock += `
+Used answers (NEVER repeat): ${previousAnswers.join(', ')}`;
+    }
+
+    stateBlock += '\n===';
+
+    return BASE_PROMPT + stateBlock;
+}
 
 // Tool definitions for structured round generation
 const TOOLS = [
@@ -175,41 +192,25 @@ export default async function handler(req, res) {
         }
     }
 
-    // Build the user message with current game state context
+    // Build location context
     const location = gameState?.location || {};
     let locationContext = '';
     if (location.city && location.region) {
-        locationContext = `Players are near ${location.city}${location.county ? ', ' + location.county : ''}, ${location.region}. GPS: ${location.latitude}, ${location.longitude}.`;
+        locationContext = `${location.city}${location.county ? ', ' + location.county : ''}, ${location.region} (GPS: ${location.latitude}, ${location.longitude})`;
     } else if (location.latitude && location.longitude) {
-        locationContext = `Players at GPS: ${location.latitude}, ${location.longitude}.`;
+        locationContext = `GPS: ${location.latitude}, ${location.longitude}`;
     }
 
-    const roundForContext = gameState?.currentRound ? { ...gameState.currentRound } : {};
-    delete roundForContext.essay;
-
-    const currentLetter = roundForContext?.letter || 'none';
-    const currentAnswer = roundForContext?.answer || 'none';
-    const hintsRevealed = roundForContext?.hintsRevealed || 0;
-
     const previousAnswers = gameState?.previousAnswers || [];
-    const prevAnswersList = previousAnswers.length > 0
-        ? previousAnswers.join(', ')
-        : 'none yet';
 
-    const stateDescription = `
-=== GAME STATE (TRUTH — overrides chat history) ===
-Phase: ${gameState?.phase || 'setup_intro'} | Round #${gameState?.roundNumber || 0} | Category: ${gameState?.category || 'none'} | Difficulty: ${gameState?.difficulty || 'not set'}
-Current letter: ${currentLetter} | Answer: ${currentAnswer} | Hints revealed: ${hintsRevealed}/3
-Players: ${JSON.stringify(gameState?.players || [])}
-Location: ${locationContext || 'Unknown'}
-Used answers (never repeat): ${prevAnswersList}
-===
+    // Build dynamic system prompt with full state — this is the source of truth
+    const systemPrompt = buildSystemPrompt(gameState, locationContext);
 
-"${transcript}"`;
-
-    // Build messages array with conversation history
+    // Build messages: only last 2 messages (1 exchange) for immediate conversational
+    // continuity (e.g. "want a hint?" → "yes"), then the current user message.
+    // All authoritative state is in the system prompt, not in history.
     const messages = [];
-    const history = (conversationHistory || []).slice(-6);
+    const history = (conversationHistory || []).slice(-2);
     for (const entry of history) {
         messages.push({
             role: entry.role,
@@ -217,9 +218,10 @@ Used answers (never repeat): ${prevAnswersList}
         });
     }
 
+    // Current user message — just the transcript, no state (state is in system prompt)
     messages.push({
         role: 'user',
-        content: stateDescription
+        content: transcript
     });
 
     const client = new Anthropic({ apiKey });
@@ -233,7 +235,7 @@ Used answers (never repeat): ${prevAnswersList}
         const response = await client.messages.create({
             model: 'claude-sonnet-4-20250514',
             max_tokens: 1024,
-            system: SYSTEM_PROMPT,
+            system: systemPrompt,
             messages: messages,
             tools: TOOLS
         });
@@ -283,7 +285,7 @@ Used answers (never repeat): ${prevAnswersList}
                 // LETTER MISMATCH — retry with explicit correction
                 console.warn(`[Gamemaster] Letter mismatch: "${answer}" doesn't start with "${letter}". Retrying...`);
 
-                const retryResult = await retryRoundGeneration(client, messages, letter, previousAnswers, gameState, locationContext);
+                const retryResult = await retryRoundGeneration(client, letter, previousAnswers, gameState, locationContext);
                 if (retryResult) {
                     actions.push({
                         type: 'start_round',
@@ -307,7 +309,7 @@ Used answers (never repeat): ${prevAnswersList}
                         ? available[Math.floor(Math.random() * available.length)]
                         : 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[Math.floor(Math.random() * 26)];
 
-                    const fallbackResult = await retryRoundGeneration(client, messages, fallbackLetter, previousAnswers, gameState, locationContext);
+                    const fallbackResult = await retryRoundGeneration(client, fallbackLetter, previousAnswers, gameState, locationContext);
                     if (fallbackResult) {
                         actions.push({
                             type: 'start_round',
@@ -365,7 +367,7 @@ Used answers (never repeat): ${prevAnswersList}
  * Retry round generation with a specific letter using forced tool_choice.
  * Returns validated round data or null.
  */
-async function retryRoundGeneration(client, originalMessages, letter, previousAnswers, gameState, locationContext) {
+async function retryRoundGeneration(client, letter, previousAnswers, gameState, locationContext) {
     const prevAnswersList = previousAnswers.length > 0 ? previousAnswers.join(', ') : 'none';
     const category = gameState?.category || 'general';
     const difficulty = gameState?.difficulty || 'medium';

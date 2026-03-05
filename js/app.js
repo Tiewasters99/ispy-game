@@ -101,7 +101,7 @@ async function callGamemaster(transcript, onSpeech) {
                         region: gameState.location.region
                     }
                 },
-                conversationHistory: gameState.conversationHistory.slice(-6),
+                conversationHistory: gameState.conversationHistory.slice(-2),
                 transcript: transcript
             })
         });
@@ -275,8 +275,8 @@ async function sendToGamemaster(transcript) {
     if (data.speech) {
         gameState.conversationHistory.push({ role: 'assistant', content: data.speech });
     }
-    if (gameState.conversationHistory.length > 6) {
-        gameState.conversationHistory = gameState.conversationHistory.slice(-6);
+    if (gameState.conversationHistory.length > 2) {
+        gameState.conversationHistory = gameState.conversationHistory.slice(-2);
     }
 
     if (data.actions && Array.isArray(data.actions)) {
