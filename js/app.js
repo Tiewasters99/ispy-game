@@ -20,6 +20,8 @@ let gameState = {
     },
     conversationHistory: [],
     previousAnswers: [], // all answers from this session, to prevent repeats
+    answerPool: [], // pre-generated answers for instant round starts
+    poolLoading: false, // true while fetching a new pool batch
     location: {
         latitude: null,
         longitude: null,
@@ -32,6 +34,40 @@ let gameState = {
 };
 
 let isProcessing = false;
+
+// --- Intent Classification ---
+// Classifies player voice input so Claude gets a hint about what the player means.
+// Voice transcripts are messy — this helps route "yes" (to a hint offer) vs a guess.
+
+function classifyIntent(transcript) {
+    const t = transcript.toLowerCase().trim();
+
+    // Skip/give up
+    if (/\b(skip|give up|pass|next|move on)\b/.test(t))
+        return 'skip';
+
+    // Explicit hint request
+    if (/\b(hint|clue|help me|stuck|don'?t know)\b/.test(t))
+        return 'hint_request';
+
+    // Question (has question mark or starts with question word)
+    if (t.includes('?') || /^(who|what|where|when|why|how|is|are|was|were|do|does|did|can|could|would|tell me about)\b/.test(t))
+        return 'question';
+
+    // Explicit guess patterns
+    if (/\b(is it|i think|my (guess|answer)|i say|it'?s|gotta be|must be|i'?ll guess)\b/.test(t))
+        return 'guess';
+
+    // "yes"/"no"/"sure"/"nope" — affirmation/denial (context-dependent)
+    if (/^(yes|yeah|yep|sure|ok|okay|no|nah|nope|not yet)$/i.test(t))
+        return 'response';
+
+    // Short phrase (1-4 words, no question mark) — likely a guess during active round
+    if (t.split(/\s+/).length <= 4)
+        return 'probable_guess';
+
+    return 'conversation';
+}
 
 // --- Deterministic Guess Validation ---
 // Checks player guesses against the current answer in code, so Claude can't
@@ -62,6 +98,60 @@ function validateGuess(guess, correctAnswer) {
     }
 
     return { correct: false };
+}
+
+// --- Answer Pool Management ---
+// Pre-generates a batch of answers so rounds start instantly.
+
+async function fetchAnswerPool() {
+    if (gameState.poolLoading) return;
+    gameState.poolLoading = true;
+
+    try {
+        const response = await fetch('/api/generate-pool', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                category: gameState.category,
+                difficulty: gameState.difficulty,
+                location: {
+                    city: gameState.location.city,
+                    county: gameState.location.county,
+                    region: gameState.location.region
+                },
+                previousAnswers: gameState.previousAnswers
+            })
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            if (data.pool && data.pool.length > 0) {
+                // Append to existing pool (don't replace — may have unused entries)
+                gameState.answerPool = gameState.answerPool.concat(data.pool);
+                console.log(`[Pool] Loaded ${data.pool.length} answers, total pool: ${gameState.answerPool.length}`);
+            }
+        } else {
+            console.warn('[Pool] Failed to fetch:', response.status);
+        }
+    } catch (err) {
+        console.warn('[Pool] Fetch error:', err);
+    }
+
+    gameState.poolLoading = false;
+}
+
+function drawFromPool() {
+    if (gameState.answerPool.length === 0) return null;
+
+    // Take the first available answer
+    const entry = gameState.answerPool.shift();
+
+    // If pool is running low (<=2 left), trigger a background refill
+    if (gameState.answerPool.length <= 2 && !gameState.poolLoading) {
+        fetchAnswerPool();
+    }
+
+    return entry;
 }
 
 // DOM Elements
@@ -214,13 +304,57 @@ async function sendToGamemaster(transcript) {
         addTranscriptEntry('player', transcript);
     }
 
-    // --- Deterministic guess check: annotate transcript if guess matches ---
+    // --- Classify intent and validate guesses ---
     let annotatedTranscript = transcript;
-    if (!isSystemMessage && gameState.phase === 'playing' && gameState.currentRound?.answer && !gameState.currentRound.guessValidated) {
-        const result = validateGuess(transcript, gameState.currentRound.answer);
-        if (result.correct) {
-            gameState.currentRound.guessValidated = true;
-            annotatedTranscript = `${transcript}\n[SYSTEM: The guess "${transcript}" is CORRECT — it matches "${gameState.currentRound.answer}". Celebrate, award the point with correct_guess (identify which player said it), then ask if they have questions about the answer before moving on.]`;
+    if (!isSystemMessage && gameState.phase === 'playing' && gameState.currentRound?.answer) {
+        const intent = classifyIntent(transcript);
+
+        // Check for correct guess deterministically
+        if (!gameState.currentRound.guessValidated && (intent === 'guess' || intent === 'probable_guess')) {
+            const result = validateGuess(transcript, gameState.currentRound.answer);
+            if (result.correct) {
+                gameState.currentRound.guessValidated = true;
+                annotatedTranscript = `${transcript}\n[SYSTEM: CORRECT ANSWER. The guess matches "${gameState.currentRound.answer}". Celebrate, emit correct_guess (identify which player), then ask if they have questions before moving on.]`;
+            } else {
+                annotatedTranscript = `${transcript}\n[SYSTEM: Intent=${intent}. This is a guess attempt — evaluate against the answer "${gameState.currentRound.answer}".]`;
+            }
+        } else if (intent === 'hint_request') {
+            annotatedTranscript = `${transcript}\n[SYSTEM: Intent=hint_request. Player wants a HINT, not the answer. Use reveal_hint.]`;
+        } else if (intent === 'skip') {
+            annotatedTranscript = `${transcript}\n[SYSTEM: Intent=skip. Player wants to skip/give up. Reveal answer and essay.]`;
+        } else if (intent !== 'conversation' && intent !== 'response') {
+            annotatedTranscript = `${transcript}\n[SYSTEM: Intent=${intent}.]`;
+        }
+    }
+
+    // --- Pool-based round injection ---
+    // If it's time for a new round and we have a pre-generated answer, use it.
+    // Apply the round data client-side and tell Claude to just announce it.
+    let pooledRound = null;
+    const isNextRoundTrigger = isSystemMessage && (
+        transcript === '[Start next round]' ||
+        transcript === '[Game session started]' ||
+        transcript.includes('generate the I Spy clue')
+    );
+    const playerWantsNext = !isSystemMessage && gameState.phase === 'playing' &&
+        !gameState.currentRound?.answer &&
+        classifyIntent(transcript) !== 'question';
+
+    if ((isNextRoundTrigger || playerWantsNext) && gameState.answerPool.length > 0) {
+        pooledRound = drawFromPool();
+        if (pooledRound) {
+            // Apply the round immediately — UI updates now, no waiting for Claude
+            executeAction({
+                type: 'start_round',
+                letter: pooledRound.letter,
+                answer: pooledRound.answer,
+                hints: pooledRound.hints,
+                essay: pooledRound.essay,
+                proximity: pooledRound.proximity || 'region'
+            });
+
+            // Tell Claude to announce this specific round (don't call create_round)
+            annotatedTranscript = `[SYSTEM: A new round has started. Letter: ${pooledRound.letter}. DO NOT call create_round — the round is already set. Announce it with: "I spy with my little eye something that begins with the letter ${pooledRound.letter}." Then add a brief teaser based on the category. Respond with speech only, no start_round action needed.]`;
         }
     }
 
@@ -341,10 +475,16 @@ function executeAction(action) {
         case 'set_category':
             gameState.category = action.category;
             updateCategoryDisplay();
+            // Pre-generate answer pool in background as soon as category is set
+            fetchAnswerPool();
             break;
 
         case 'set_difficulty':
             gameState.difficulty = action.difficulty;
+            // If category is already set, refresh the pool with correct difficulty
+            if (gameState.category && gameState.answerPool.length === 0) {
+                fetchAnswerPool();
+            }
             break;
 
         case 'start_round': {
@@ -598,6 +738,8 @@ function startGame() {
     };
     gameState.conversationHistory = [];
     gameState.previousAnswers = [];
+    gameState.answerPool = [];
+    gameState.poolLoading = false;
 
     // Start location tracking
     startLocationTracking();
