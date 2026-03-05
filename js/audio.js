@@ -17,6 +17,8 @@ const AudioManager = (() => {
     let isPaused = false; // true while recognition is paused for TTS playback
     let silenceTimer = null; // timer for silence-as-send
     let silenceEnabled = false; // set true after TTS finishes, cleared on speech or send
+    let currentSpeechId = 0; // monotonic ID to discard stale audio callbacks
+    let recognitionStarting = false; // guard against concurrent start() calls
 
     // Callbacks set by app.js
     let onVoiceGuess = null;
@@ -100,16 +102,23 @@ const AudioManager = (() => {
         console.log('[AudioManager] Initialized. Muted:', muted, '| Speech Recognition:', hasSpeechRecognition);
     }
 
+    // --- Ensure speechAudio is always available ---
+    function ensureSpeechAudio() {
+        if (!speechAudio) {
+            speechAudio = new Audio();
+        }
+        return speechAudio;
+    }
+
     // --- TTS (ElevenLabs only — Professor Jones voice, no browser fallback) ---
     async function speak(text) {
         if (muted || !text) return;
 
         stopSpeaking();
+        const myId = ++currentSpeechId;
 
         // Keep recognition running during TTS — player can interrupt
-        if (!isListening && !muted && hasSpeechRecognition && recognitionMode) {
-            startListening(recognitionMode);
-        }
+        ensureRecognitionRunning();
 
         try {
             const user = typeof supabase !== 'undefined' ? supabase.auth.getUser() : null;
@@ -123,20 +132,26 @@ const AudioManager = (() => {
                 })
             });
 
+            // If a newer speak() was called while we were fetching, bail out
+            if (myId !== currentSpeechId) return;
+
             if (response.ok) {
                 const contentType = response.headers.get('content-type');
                 if (contentType && contentType.includes('audio')) {
                     const audioBlob = await response.blob();
-                    const audioUrl = URL.createObjectURL(audioBlob);
+                    if (myId !== currentSpeechId) return;
 
-                    // Reuse the persistent audio element (unlocked on user gesture)
-                    const audio = speechAudio || new Audio();
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    const audio = ensureSpeechAudio();
+
                     audio.onended = () => {
+                        if (myId !== currentSpeechId) { URL.revokeObjectURL(audioUrl); return; }
                         isSpeaking = false;
                         URL.revokeObjectURL(audioUrl);
                         startSilenceTimer();
                     };
                     audio.onerror = () => {
+                        if (myId !== currentSpeechId) { URL.revokeObjectURL(audioUrl); return; }
                         isSpeaking = false;
                         URL.revokeObjectURL(audioUrl);
                         startSilenceTimer();
@@ -144,17 +159,26 @@ const AudioManager = (() => {
                     audio.src = audioUrl;
                     isSpeaking = true;
 
-                    await audio.play();
+                    try {
+                        await audio.play();
+                    } catch (playErr) {
+                        console.warn('[AudioManager] audio.play() rejected:', playErr);
+                        isSpeaking = false;
+                        startSilenceTimer();
+                    }
                     return;
                 }
             }
         } catch (e) {
+            if (myId !== currentSpeechId) return;
             // ElevenLabs failed — no fallback, text is visible in transcript
         }
 
         // TTS unavailable — just start silence timer so the game continues
-        isSpeaking = false;
-        startSilenceTimer();
+        if (myId === currentSpeechId) {
+            isSpeaking = false;
+            startSilenceTimer();
+        }
     }
 
     function speakBrowser(text) {
@@ -209,15 +233,14 @@ const AudioManager = (() => {
 
     async function playPrefetched(blobPromise) {
         stopSpeaking();
+        const myId = ++currentSpeechId;
 
         // Keep recognition running during TTS — player can interrupt
-        // Only start recognition if not already listening
-        if (!isListening && !muted && hasSpeechRecognition && recognitionMode) {
-            startListening(recognitionMode);
-        }
+        ensureRecognitionRunning();
 
         try {
             const blob = await blobPromise;
+            if (myId !== currentSpeechId) return;
             if (!blob) {
                 isSpeaking = false;
                 startSilenceTimer();
@@ -225,28 +248,43 @@ const AudioManager = (() => {
             }
 
             const audioUrl = URL.createObjectURL(blob);
-            const audio = speechAudio || new Audio();
+            const audio = ensureSpeechAudio();
             audio.onended = () => {
+                if (myId !== currentSpeechId) { URL.revokeObjectURL(audioUrl); return; }
                 isSpeaking = false;
                 URL.revokeObjectURL(audioUrl);
                 startSilenceTimer();
             };
             audio.onerror = () => {
+                if (myId !== currentSpeechId) { URL.revokeObjectURL(audioUrl); return; }
                 isSpeaking = false;
                 URL.revokeObjectURL(audioUrl);
                 startSilenceTimer();
             };
             audio.src = audioUrl;
             isSpeaking = true;
-            await audio.play();
+            try {
+                await audio.play();
+            } catch (playErr) {
+                console.warn('[AudioManager] prefetched audio.play() rejected:', playErr);
+                if (myId === currentSpeechId) {
+                    isSpeaking = false;
+                    startSilenceTimer();
+                }
+            }
         } catch (e) {
-            isSpeaking = false;
-            startSilenceTimer();
+            if (myId === currentSpeechId) {
+                isSpeaking = false;
+                startSilenceTimer();
+            }
         }
     }
 
     function stopSpeaking() {
+        ++currentSpeechId; // invalidate any in-flight audio callbacks
         if (speechAudio) {
+            speechAudio.onended = null;
+            speechAudio.onerror = null;
             speechAudio.pause();
             speechAudio.currentTime = 0;
         }
@@ -321,11 +359,21 @@ const AudioManager = (() => {
         dispatchEvent('essay-playback-change', { playing: false });
     }
 
+    // --- Safely restart recognition if it should be running but isn't ---
+    function ensureRecognitionRunning() {
+        if (!hasSpeechRecognition || muted) return;
+        if (isListening || recognitionStarting) return;
+        const mode = recognitionMode || 'command';
+        startListening(mode);
+    }
+
     // --- Speech Recognition ---
     function startListening(mode) {
         if (!hasSpeechRecognition || muted) return false;
+        if (recognitionStarting) return false;
 
         stopListening();
+        recognitionStarting = true;
 
         recognitionMode = mode; // 'guess' or 'command'
 
@@ -341,6 +389,7 @@ const AudioManager = (() => {
         }
 
         recognition.onstart = () => {
+            recognitionStarting = false;
             isListening = true;
             dispatchEvent('listening-state-change', { listening: true, mode });
         };
@@ -371,6 +420,7 @@ const AudioManager = (() => {
         };
 
         recognition.onerror = (event) => {
+            recognitionStarting = false;
             if (event.error !== 'no-speech' && event.error !== 'aborted') {
                 console.warn('[AudioManager] Recognition error:', event.error);
             }
@@ -381,13 +431,21 @@ const AudioManager = (() => {
         };
 
         recognition.onend = () => {
+            recognitionStarting = false;
             if (mode === 'command' && isListening && !muted) {
-                try {
-                    recognition.start();
-                } catch (e) {
-                    isListening = false;
-                    dispatchEvent('listening-state-change', { listening: false, mode });
-                }
+                // Delay restart slightly to avoid rapid start/stop cycles
+                setTimeout(() => {
+                    if (recognitionMode === 'command' && !muted && !recognitionStarting) {
+                        try {
+                            recognition.start();
+                            recognitionStarting = true;
+                        } catch (e) {
+                            recognitionStarting = false;
+                            isListening = false;
+                            dispatchEvent('listening-state-change', { listening: false, mode });
+                        }
+                    }
+                }, 100);
                 return;
             }
             isListening = false;
@@ -398,6 +456,7 @@ const AudioManager = (() => {
             recognition.start();
             return true;
         } catch (e) {
+            recognitionStarting = false;
             console.warn('[AudioManager] Failed to start recognition:', e);
             return false;
         }
@@ -406,6 +465,7 @@ const AudioManager = (() => {
     function stopListening() {
         isListening = false;
         isPaused = false;
+        recognitionStarting = false;
         clearSilenceTimer();
         if (recognition) {
             try {
@@ -443,7 +503,7 @@ const AudioManager = (() => {
     // --- Silence Detection ---
     // After TTS finishes and recognition resumes, if no speech for ~4s,
     // fire a silence event so the app can auto-send to gamemaster.
-    const SILENCE_TIMEOUT = 8000;
+    const SILENCE_TIMEOUT = 6000;
 
     function startSilenceTimer() {
         clearSilenceTimer();

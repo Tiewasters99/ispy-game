@@ -386,7 +386,7 @@ async function sendToGamemaster(transcript) {
     if ((isNextRoundTrigger || playerWantsNext) && gameState.answerPool.length > 0) {
         pooledRound = drawFromPool();
         if (pooledRound) {
-            // Apply the round immediately — UI updates now, no waiting for Claude
+            // Apply the round immediately — UI updates now
             executeAction({
                 type: 'start_round',
                 letter: pooledRound.letter,
@@ -396,8 +396,27 @@ async function sendToGamemaster(transcript) {
                 proximity: pooledRound.proximity || 'region'
             });
 
-            // Tell Claude to announce this specific round (don't call create_round)
-            annotatedTranscript = `[SYSTEM: A new round has started. Letter: ${pooledRound.letter}. DO NOT call create_round — the round is already set. Announce it with: "I spy with my little eye something that begins with the letter ${pooledRound.letter}." Then add a brief teaser based on the category. Respond with speech only, no start_round action needed.]`;
+            // If pool entry has pre-generated speech, skip the API call entirely
+            if (pooledRound.speech) {
+                clearTimeout(safetyTimeout);
+                addTranscriptEntry('jones', pooledRound.speech);
+                AudioManager.speak(pooledRound.speech);
+                gameState.conversationHistory.push({ role: 'user', content: transcript });
+                gameState.conversationHistory.push({ role: 'assistant', content: pooledRound.speech });
+                if (gameState.conversationHistory.length > 2) {
+                    gameState.conversationHistory = gameState.conversationHistory.slice(-2);
+                }
+                isProcessing = false;
+                if (pendingTranscript) {
+                    const queued = pendingTranscript;
+                    pendingTranscript = null;
+                    sendToGamemaster(queued);
+                }
+                return;
+            }
+
+            // No speech in pool entry — ask Claude to announce it
+            annotatedTranscript = `[SYSTEM: A new round has started. Letter: ${pooledRound.letter}. DO NOT call create_round — the round is already set. Announce it with: "I spy with my little eye something that begins with the letter ${pooledRound.letter}." Then add a brief teaser. Speech only, no start_round action.]`;
         }
     }
 
@@ -473,6 +492,25 @@ async function sendToGamemaster(transcript) {
         AudioManager.playPrefetched(ttsPromise).catch(e =>
             console.warn('[Game] TTS playback error (non-blocking):', e)
         );
+    }
+
+    // AUTO-ADVANCE: if round just ended (correct guess or answer revealed), start next round
+    const hadCorrectGuess = data.actions && data.actions.some(a => a.type === 'correct_guess');
+    const hadRevealAnswer = data.actions && data.actions.some(a => a.type === 'reveal_answer');
+    if ((hadCorrectGuess || hadRevealAnswer) && gameState.answerPool.length > 0) {
+        isProcessing = false;
+        // Wait for TTS to finish speaking, then brief pause, then next round
+        const waitForSpeech = () => {
+            if (AudioManager.isSpeaking) {
+                setTimeout(waitForSpeech, 500);
+            } else {
+                // Brief pause after speech ends so it doesn't feel rushed
+                setTimeout(() => sendToGamemaster('[Start next round]'), 1500);
+            }
+        };
+        // Start checking after a minimum delay
+        setTimeout(waitForSpeech, 1000);
+        return;
     }
 
     // Safety net: if category is set but Claude didn't generate a clue yet

@@ -33,9 +33,13 @@ const POOL_TOOL = {
                         essay: {
                             type: 'string',
                             description: '2-3 sentence fun fact about the answer'
+                        },
+                        speech: {
+                            type: 'string',
+                            description: 'Professor Jones announcing this round. MUST begin with "I spy with my little eye something that begins with the letter [X]." Then a brief witty teaser. Keep under 2 sentences total.'
                         }
                     },
-                    required: ['letter', 'answer', 'hints', 'essay']
+                    required: ['letter', 'answer', 'hints', 'essay', 'speech']
                 }
             }
         },
@@ -86,7 +90,7 @@ export default async function handler(req, res) {
         const response = await client.messages.create({
             model: 'claude-sonnet-4-20250514',
             max_tokens: 4000,
-            system: 'You generate I Spy game answer pools. Always use the answer_pool tool. Every answer MUST start with its assigned letter — this is validated by code. Be creative and varied. Avoid the most obvious/famous answers. Each essay should teach something genuinely surprising.',
+            system: 'You generate I Spy game answer pools. Always use the answer_pool tool. Every answer MUST start with its assigned letter — this is validated by code. Be creative and varied. Avoid the most obvious/famous answers. Each essay should teach something genuinely surprising. For speech: always begin with "I spy with my little eye something that begins with the letter [X]." then add a brief witty teaser. Keep speech punchy — 2 sentences max.',
             messages: [{
                 role: 'user',
                 content: `Generate one answer per letter for: ${letters.join(', ')}.
@@ -123,6 +127,7 @@ Each answer MUST start with its assigned letter. Be creative — avoid the most 
             answer: entry.answer,
             hints: entry.hints || [],
             essay: entry.essay || '',
+            speech: entry.speech || `I spy with my little eye something that begins with the letter ${entry.letter.toUpperCase()}.`,
             proximity: 'region'
         }));
 
