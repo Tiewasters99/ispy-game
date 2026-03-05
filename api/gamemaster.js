@@ -1,37 +1,118 @@
 // Vercel Serverless Function — Conversational Game Master ("Professor Jones")
-// Single endpoint replacing /api/clue and /api/ask
-// Receives full game state + conversation history + latest transcript
-// Returns Professor Jones's speech + structured game actions
+// Uses Claude Sonnet 4 with tool use for structured round generation
+// Deterministic code-level validation for letter matching
 
 import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@supabase/supabase-js';
 
-const SYSTEM_PROMPT = `THE GAME IS CALLED "I SPY WITH MY LITTLE EYE." That is the name. Always refer to it as "I Spy With My Little Eye" — never "the A-Z game," never just "I Spy," never any other name.
+const SYSTEM_PROMPT = `THE GAME IS CALLED "I SPY WITH MY LITTLE EYE." Always use that name.
 
 You ARE Professor Jones — bailed on academia, rides along on road trips because the world is funnier than any syllabus.
 
-VOICE: TTS in a car. Max 15 words per sentence. Conversational — false starts, pivots. Never narrate actions. Never "Great question!" Be quick, warm, real.
+VOICE: TTS in a car. Max 15 words per sentence. Snappy, punchy, conversational. No filler, no narrating actions, no "Great question!" If they're wrong, say so fast. If they're right, celebrate fast.
 
-WHO YOU ARE: Witty first, smart second. Playful, mischievous, rebel at heart. You love repartee — volley jokes back, find the absurd, drop knowledge like gossip not lectures. Game for ANY direction: tangents, hypotheticals, dumb jokes. Match their energy. Never ornery, never grumpy. Even disagreements come with a grin. Road trip companion FIRST, game master second. Lean into what people share — riff, connect to something unexpected, take it somewhere funny. The game waits. The person doesn't.
+WHO YOU ARE: Witty first, smart second. Playful, mischievous. Volley jokes, find the absurd, drop knowledge like gossip not lectures. Match their energy. Road trip companion FIRST, game master second. Lean into what people share — riff, connect to something unexpected. The game waits. The person doesn't.
 
-WHEN ASKED TO DO SOMETHING (hint/skip/next/answer): Just DO it. Don't echo or confirm.
+REQUESTS — LISTEN CAREFULLY:
+- "hint" / "clue" / "help" / "yes" (to "want a hint?") → Give NEXT HINT ONLY. Use the reveal_hint tool. NEVER reveal the answer for a hint request.
+- "skip" / "give up" / "next" / "pass" → Reveal answer + essay, then offer next round.
+- "what's the answer" / "tell me" / "I give up, what is it" → Only THEN reveal the answer.
+A hint is NOT the answer.
 
-PHASES: Keep setup SHORT. Get to the game FAST. setup_intro → quick greeting, ask who's playing (one question, not a conversation). player_registration → register players, leader picks category (American History, Civil Rights, Music, Hollywood, Science, or custom). As SOON as a category is set, immediately jump to playing — deliver the first "I spy with my little eye something that begins with the letter..." clue in that SAME response. Don't delay with chitchat. playing → GPS-based clues. game_over → final scores.
+SETUP PHASES (keep it SHORT):
+1. setup_intro → Greet, ask who's playing. Tell them: "Say 'this is [your name]' before your answer so I can tell y'all apart, and try to speak clearly." First player is leader.
+2. player_registration → Register players. Then ask difficulty: "How tough — easy, medium, or hard?" Then leader picks category (American History, Civil Rights, Music, Hollywood, Science, or custom).
+3. As SOON as category is set, immediately deliver the first clue using the create_round tool. Don't delay.
 
-CLUES: Include start_round with ALL data in ONE response. GPS + category. Priority: here (<10mi) > nearby (<100mi, set nearbyLocation) > region. Find the STORY. 3 hints (vague→specific). Essay: 2-3 sentences.
+DIFFICULTY (check gameState.difficulty):
+- easy: Well-known names/places/events. Simple hints.
+- medium: Mix of common and moderate. Standard hints.
+- hard: Deep cuts, obscure facts. Cryptic hints.
+Default to medium if not set.
 
-THE CLUE OPENING IS SACRED. Every single clue MUST begin with these exact words, verbatim, no exceptions: "I spy with my little eye something that begins with the letter [X]." This is the name of the game. Never rephrase it. Never say "I spy something that starts with..." or "Your letter is..." or "Let's try the letter..." or ANY other variation. The exact phrase "I spy with my little eye something that begins with the letter" followed by the letter. Every time. Then add a brief teaser.
+CREATING ROUNDS — USE THE create_round TOOL:
+- When it's time for a new clue, call the create_round tool. The system validates your answer automatically.
+- Use GPS + category. Priority: nearby (<10mi) > nearby (<100mi) > region. Find the STORY.
+- Check ALREADY USED ANSWERS and pick something fresh. Don't default to the most famous answer.
+- Your speech MUST begin with: "I spy with my little eye something that begins with the letter [X]." Verbatim. Then add a brief teaser.
+- NEVER announce a round without calling create_round in the same response. Announcing without delivering freezes the game.
 
-GUESSING: Be generous — partial matches count. Wrong: quick reaction. Right: celebrate briefly, then TAKE CHARGE — in the SAME response, deliver the next "I spy with my little eye something that begins with the letter..." clue with a start_round action. Don't wait for permission, don't ask if they're ready, don't pause between rounds. Banter then next clue, one response. Skip/give up: reveal + show_essay, then immediately start_round with the next clue in the same response.
+PLAYER IDENTIFICATION: Players say "this is [name]" before answering. Greet them by name and respond to their answer in ONE response. Don't nag unidentified speakers.
+
+ANSWER VALIDATION — STRICT:
+- The answer MUST start with the current round letter (gameState.currentRound.letter). Wrong letter = instant rejection.
+- Must match gameState.currentRound.answer. "Close enough" = synonyms/alternate names for the SAME thing only.
+- Never accept wrong answers. If close but not right, nudge ("Close! Think more specific...").
+- On correct guess, identify the player. If unclear who guessed, ask.
+
+SCORING — USE TOOLS TO CHANGE SCORES:
+- gameState.players is the source of truth.
+- Award points: use correct_guess tool. Fix mistakes: use set_score tool.
+- NEVER claim you've fixed a score without using set_score. Speech alone changes nothing.
+
+HINT PENALTY: Hints cost a point. Say "Hint coming — costs you a point." Include the player name in reveal_hint.
+
+BETWEEN ROUNDS:
+1. Quick celebration (one sentence).
+2. "Any questions about [answer] before we keep rolling?"
+3. WAIT (no_action). Don't start the next round yet.
+4. On next response: if they ask a question, answer it then ask "Ready for the next one?" If they say "no"/"next"/stay silent, deliver next clue with create_round.
+
+LISTENING: Voice input is messy. If unsure what they said, ask them to repeat. Don't assume. If it's a question, answer it — don't treat it as a guess.
 
 LEADER: Only isLeader:true can reroll/skip/change category/end.
 
-SILENCE ("[No response — player is silent]"): After clue → say NOTHING, emit no_action. After answer/essay → next round. After your question → one gentle nudge. Second silence → empty speech, no_action.
+SILENCE ("[No response — player is silent]"): After clue → say nothing, no_action. After answer → next round. After question → one gentle nudge. Second silence → empty speech, no_action.
 
-ACTIONS: set_phase, register_player, set_category, start_round(letter/answer/hints[3]/essay/proximity/nearbyLocation), correct_guess(player/points), incorrect_guess, reveal_hint(hintIndex 0-2), reveal_answer, show_essay(essay), next_round, reroll, end_game, no_action
+CRITICAL: gameState is the SINGLE SOURCE OF TRUTH. Current letter/answer are in gameState.currentRound. Never change or forget the letter mid-round. Hint at the CURRENT answer only.
 
-RESPONSE: Valid JSON only. {"speech":"...","actions":[...]}
-gameState = truth. Essays in show_essay only, never speech.`;
+RESPONSE: Valid JSON only. {"speech":"...","actions":[...]}`;
+
+// Tool definitions for structured round generation
+const TOOLS = [
+    {
+        name: 'create_round',
+        description: 'Create a new I Spy round with a letter, answer, hints, and essay. The answer MUST start with the given letter. The system will validate this automatically.',
+        input_schema: {
+            type: 'object',
+            properties: {
+                letter: {
+                    type: 'string',
+                    description: 'A single uppercase letter (A-Z) for this round'
+                },
+                answer: {
+                    type: 'string',
+                    description: 'The answer that players must guess. MUST start with the given letter.'
+                },
+                hints: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Exactly 3 hints, ordered from vague to specific',
+                    minItems: 3,
+                    maxItems: 3
+                },
+                essay: {
+                    type: 'string',
+                    description: 'A 2-3 sentence fun fact essay about the answer'
+                },
+                proximity: {
+                    type: 'string',
+                    enum: ['here', 'nearby', 'region'],
+                    description: 'How close the answer is to the players GPS location'
+                },
+                nearbyLocation: {
+                    type: 'string',
+                    description: 'If proximity is nearby, the name of the nearby location'
+                },
+                speech: {
+                    type: 'string',
+                    description: 'What Professor Jones says when presenting this clue. MUST begin with "I spy with my little eye something that begins with the letter [X]." followed by a brief teaser.'
+                }
+            },
+            required: ['letter', 'answer', 'hints', 'essay', 'proximity', 'speech']
+        }
+    }
+];
 
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
@@ -60,7 +141,7 @@ export default async function handler(req, res) {
         (!gameState.currentRound?.answer || transcript === '[Start next round]' || transcript === '[Game session started]');
     const creditCost = isRoundStart ? 10 : 3;
 
-    // Check user credits and deduct in one query if userId provided
+    // Check user credits and deduct if userId provided
     let remainingCredits = null;
     if (userId) {
         const { data: user, error } = await supabase
@@ -86,7 +167,6 @@ export default async function handler(req, res) {
 
             remainingCredits = user.credits - creditCost;
 
-            // Deduct credits (don't await — fire and forget, we already computed the balance)
             supabase
                 .from('users')
                 .update({ credits: remainingCredits })
@@ -104,24 +184,32 @@ export default async function handler(req, res) {
         locationContext = `Players at GPS: ${location.latitude}, ${location.longitude}.`;
     }
 
-    // Strip essay from currentRound to save tokens (Claude already generated it)
     const roundForContext = gameState?.currentRound ? { ...gameState.currentRound } : {};
     delete roundForContext.essay;
 
+    const currentLetter = roundForContext?.letter || 'none';
+    const currentAnswer = roundForContext?.answer || 'none';
+    const hintsRevealed = roundForContext?.hintsRevealed || 0;
+
+    const previousAnswers = gameState?.previousAnswers || [];
+    const prevAnswersList = previousAnswers.length > 0
+        ? previousAnswers.join(', ')
+        : 'none yet';
+
     const stateDescription = `
-GAME STATE:
-Phase: ${gameState?.phase || 'setup_intro'} | Round: ${gameState?.roundNumber || 0} | Category: ${gameState?.category || 'none'}
+=== GAME STATE (TRUTH — overrides chat history) ===
+Phase: ${gameState?.phase || 'setup_intro'} | Round #${gameState?.roundNumber || 0} | Category: ${gameState?.category || 'none'} | Difficulty: ${gameState?.difficulty || 'not set'}
+Current letter: ${currentLetter} | Answer: ${currentAnswer} | Hints revealed: ${hintsRevealed}/3
 Players: ${JSON.stringify(gameState?.players || [])}
-Round: ${JSON.stringify(roundForContext)}
 Location: ${locationContext || 'Unknown'}
+Used answers (never repeat): ${prevAnswersList}
+===
 
 "${transcript}"`;
 
     // Build messages array with conversation history
     const messages = [];
-
-    // Add conversation history (last 10 exchanges)
-    const history = (conversationHistory || []).slice(-12); // 12 messages = 6 exchanges
+    const history = (conversationHistory || []).slice(-6);
     for (const entry of history) {
         messages.push({
             role: entry.role,
@@ -129,90 +217,141 @@ Location: ${locationContext || 'Unknown'}
         });
     }
 
-    // Add the current user message
     messages.push({
         role: 'user',
         content: stateDescription
     });
 
-    // --- Stream Claude response, send speech to client as soon as it's ready ---
     const client = new Anthropic({ apiKey });
 
+    // Set NDJSON headers
+    res.setHeader('Content-Type', 'application/x-ndjson');
+    res.setHeader('Cache-Control', 'no-cache');
+
     try {
-        const stream = client.messages.stream({
-            model: 'claude-3-5-haiku-20241022',
+        // Call Claude with tools available
+        const response = await client.messages.create({
+            model: 'claude-sonnet-4-20250514',
             max_tokens: 1024,
             system: SYSTEM_PROMPT,
-            messages: messages
+            messages: messages,
+            tools: TOOLS
         });
 
-        // Accumulate text from stream events, extract speech early
-        let accumulated = '';
-        let speechSent = false;
+        // Process the response — may contain text, tool_use, or both
+        let speech = '';
+        let actions = [];
+        let toolUseBlock = null;
 
-        // Set NDJSON headers — we'll send speech line first, then complete line
-        res.setHeader('Content-Type', 'application/x-ndjson');
-        res.setHeader('Cache-Control', 'no-cache');
-
-        stream.on('text', (text) => {
-            accumulated += text;
-
-            // Try to extract speech early (before full JSON is ready)
-            if (!speechSent) {
-                const speech = extractSpeech(accumulated);
-                if (speech !== null) {
-                    speechSent = true;
-                    res.write(JSON.stringify({ type: 'speech', speech }) + '\n');
+        for (const block of response.content) {
+            if (block.type === 'text') {
+                // Parse the JSON text response for speech and actions
+                let parsed = tryParseJSON(block.text);
+                if (parsed) {
+                    if (parsed.speech) speech = parsed.speech;
+                    if (parsed.actions) actions = parsed.actions;
                 }
+            } else if (block.type === 'tool_use' && block.name === 'create_round') {
+                toolUseBlock = block;
             }
-        });
+        }
 
-        // Wait for stream to finish
-        const message = await stream.finalMessage();
-        const content = message.content[0].text;
+        // If Claude called create_round, validate and convert to start_round action
+        if (toolUseBlock) {
+            const round = toolUseBlock.input;
+            const letter = (round.letter || '').toUpperCase();
+            const answer = round.answer || '';
 
-        // Parse the full JSON response
-        let parsed;
-        try {
-            parsed = JSON.parse(content);
-        } catch (e) {
-            const jsonMatch = content.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-                try {
-                    parsed = JSON.parse(jsonMatch[0]);
-                } catch (e2) {
-                    console.error('Failed to parse Claude response:', content);
-                    res.write(JSON.stringify({
-                        type: 'error',
-                        speech: "Sorry, I lost my train of thought. Say that again?",
-                        actions: [{ type: 'no_action' }]
-                    }) + '\n');
-                    return res.end();
+            // DETERMINISTIC VALIDATION: answer must start with the letter
+            if (answer && letter && answer[0].toUpperCase() === letter) {
+                // Valid — convert to start_round action
+                actions.push({
+                    type: 'start_round',
+                    letter: letter,
+                    answer: answer,
+                    hints: round.hints || [],
+                    essay: round.essay || '',
+                    proximity: round.proximity || 'region',
+                    nearbyLocation: round.nearbyLocation || null
+                });
+
+                // Use speech from the tool call if main speech is empty
+                if (!speech && round.speech) {
+                    speech = round.speech;
                 }
             } else {
-                parsed = { speech: content, actions: [{ type: 'no_action' }] };
+                // LETTER MISMATCH — retry with explicit correction
+                console.warn(`[Gamemaster] Letter mismatch: "${answer}" doesn't start with "${letter}". Retrying...`);
+
+                const retryResult = await retryRoundGeneration(client, messages, letter, previousAnswers, gameState, locationContext);
+                if (retryResult) {
+                    actions.push({
+                        type: 'start_round',
+                        letter: retryResult.letter,
+                        answer: retryResult.answer,
+                        hints: retryResult.hints || [],
+                        essay: retryResult.essay || '',
+                        proximity: retryResult.proximity || 'region',
+                        nearbyLocation: retryResult.nearbyLocation || null
+                    });
+                    if (!speech && retryResult.speech) {
+                        speech = retryResult.speech;
+                    }
+                } else {
+                    // Retry also failed — ask for a different letter entirely
+                    speech = speech || "Hmm, let me try a different letter.";
+                    // Pick a random letter that hasn't been used recently
+                    const usedLetters = previousAnswers.map(a => a[0]?.toUpperCase()).filter(Boolean);
+                    const available = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').filter(l => !usedLetters.includes(l));
+                    const fallbackLetter = available.length > 0
+                        ? available[Math.floor(Math.random() * available.length)]
+                        : 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[Math.floor(Math.random() * 26)];
+
+                    const fallbackResult = await retryRoundGeneration(client, messages, fallbackLetter, previousAnswers, gameState, locationContext);
+                    if (fallbackResult) {
+                        actions.push({
+                            type: 'start_round',
+                            letter: fallbackResult.letter,
+                            answer: fallbackResult.answer,
+                            hints: fallbackResult.hints || [],
+                            essay: fallbackResult.essay || '',
+                            proximity: fallbackResult.proximity || 'region',
+                            nearbyLocation: fallbackResult.nearbyLocation || null
+                        });
+                        speech = fallbackResult.speech || speech;
+                    }
+                }
             }
+        }
+
+        // If no actions parsed, default to no_action
+        if (actions.length === 0) {
+            actions = [{ type: 'no_action' }];
+        }
+
+        // Send speech early for TTS
+        if (speech) {
+            res.write(JSON.stringify({ type: 'speech', speech }) + '\n');
         }
 
         // Send complete response
         res.write(JSON.stringify({
             type: 'complete',
-            speech: parsed.speech || '',
-            actions: parsed.actions || [{ type: 'no_action' }],
+            speech: speech,
+            actions: actions,
             remainingCredits
         }) + '\n');
         return res.end();
     } catch (error) {
-        console.error('Gamemaster error:', error);
-        // If headers not yet sent, use normal JSON error
+        console.error('Gamemaster error:', error?.message || error, error?.status || '');
         if (!res.headersSent) {
             return res.status(500).json({
                 error: 'Failed to process',
+                detail: error?.message || String(error),
                 speech: "Sorry, I lost my train of thought. Say that again?",
                 actions: [{ type: 'no_action' }]
             });
         }
-        // Headers already sent (mid-stream error) — send NDJSON error line
         res.write(JSON.stringify({
             type: 'error',
             speech: "Sorry, I lost my train of thought. Say that again?",
@@ -223,20 +362,66 @@ Location: ${locationContext || 'Unknown'}
 }
 
 /**
- * Extract "speech" value from partially-streamed JSON.
+ * Retry round generation with a specific letter using forced tool_choice.
+ * Returns validated round data or null.
  */
-function extractSpeech(text) {
-    const match = text.match(/"speech"\s*:\s*"/);
-    if (!match) return null;
-    let i = match.index + match[0].length;
-    while (i < text.length) {
-        if (text[i] === '\\') { i += 2; continue; }
-        if (text[i] === '"') {
-            try {
-                return JSON.parse('"' + text.substring(match.index + match[0].length, i) + '"');
-            } catch { return null; }
+async function retryRoundGeneration(client, originalMessages, letter, previousAnswers, gameState, locationContext) {
+    const prevAnswersList = previousAnswers.length > 0 ? previousAnswers.join(', ') : 'none';
+    const category = gameState?.category || 'general';
+    const difficulty = gameState?.difficulty || 'medium';
+
+    const retryMessages = [
+        {
+            role: 'user',
+            content: `Generate an I Spy round for the letter "${letter}". Category: ${category}. Difficulty: ${difficulty}. Location: ${locationContext || 'Unknown'}. Already used answers (do NOT repeat): ${prevAnswersList}. The answer MUST start with the letter "${letter}". Call the create_round tool.`
         }
-        i++;
+    ];
+
+    try {
+        const retryResponse = await client.messages.create({
+            model: 'claude-sonnet-4-20250514',
+            max_tokens: 512,
+            system: 'You generate I Spy game rounds. Always use the create_round tool. The answer MUST start with the specified letter. Begin your speech with "I spy with my little eye something that begins with the letter [X]." followed by a brief teaser.',
+            messages: retryMessages,
+            tools: TOOLS,
+            tool_choice: { type: 'tool', name: 'create_round' }
+        });
+
+        for (const block of retryResponse.content) {
+            if (block.type === 'tool_use' && block.name === 'create_round') {
+                const round = block.input;
+                const roundLetter = (round.letter || '').toUpperCase();
+                const roundAnswer = round.answer || '';
+
+                if (roundAnswer && roundLetter && roundAnswer[0].toUpperCase() === roundLetter) {
+                    return { ...round, letter: roundLetter };
+                }
+                console.warn(`[Gamemaster] Retry also mismatched: "${roundAnswer}" for letter "${roundLetter}"`);
+            }
+        }
+    } catch (err) {
+        console.error('[Gamemaster] Retry failed:', err?.message || err);
     }
     return null;
+}
+
+/**
+ * Try to parse JSON from Claude's text response.
+ * Handles both clean JSON and JSON embedded in other text.
+ */
+function tryParseJSON(text) {
+    if (!text || !text.trim()) return null;
+    try {
+        return JSON.parse(text);
+    } catch {
+        const match = text.match(/\{[\s\S]*\}/);
+        if (match) {
+            try {
+                return JSON.parse(match[0]);
+            } catch {
+                return null;
+            }
+        }
+        return null;
+    }
 }

@@ -7,6 +7,7 @@ let gameState = {
     players: [],
     roundNumber: 0,
     category: null,
+    difficulty: null, // 'easy' | 'medium' | 'hard'
     currentRound: {
         letter: null,
         answer: null,
@@ -17,6 +18,7 @@ let gameState = {
         essay: null
     },
     conversationHistory: [],
+    previousAnswers: [], // all answers from this session, to prevent repeats
     location: {
         latitude: null,
         longitude: null,
@@ -57,6 +59,8 @@ async function callGamemaster(transcript, onSpeech) {
                     currentRound: gameState.currentRound,
                     roundNumber: gameState.roundNumber,
                     category: gameState.category,
+                    difficulty: gameState.difficulty,
+                    previousAnswers: gameState.previousAnswers,
                     location: {
                         latitude: gameState.location.latitude,
                         longitude: gameState.location.longitude,
@@ -65,7 +69,7 @@ async function callGamemaster(transcript, onSpeech) {
                         region: gameState.location.region
                     }
                 },
-                conversationHistory: gameState.conversationHistory.slice(-12),
+                conversationHistory: gameState.conversationHistory.slice(-6),
                 transcript: transcript
             })
         });
@@ -73,11 +77,14 @@ async function callGamemaster(transcript, onSpeech) {
         clearTimeout(timeout);
 
         if (response.status === 402) {
+            console.warn('[Game] Out of credits (402)');
             showOutOfCredits();
             return null;
         }
 
         if (!response.ok) {
+            const errBody = await response.text().catch(() => '');
+            console.error('[Game] Gamemaster API error:', response.status, errBody);
             if (retryCount < 1) {
                 retryCount++;
                 return callGamemaster(transcript, onSpeech);
@@ -173,25 +180,47 @@ async function sendToGamemaster(transcript) {
     const isSystemMessage = transcript.startsWith('[');
     if (!isSystemMessage) {
         addTranscriptEntry('player', transcript);
-        addTranscriptEntry('jones', '...', true); // thinking indicator
     }
+    // Always show thinking indicator — even for system messages, so the UI never looks dead
+    addTranscriptEntry('jones', '...', true);
 
     let ttsPromise = null;
     let speechHandled = false;
 
-    const data = await callGamemaster(transcript, (speech) => {
-        speechHandled = true;
-        ttsPromise = AudioManager.prefetchAudio(speech);
-        AudioManager.playPrefetched(ttsPromise);
-        addTranscriptEntry('jones', speech);
-        removeThinkingIndicator();
-    });
+    let data;
+    try {
+        data = await callGamemaster(transcript, (speech) => {
+            speechHandled = true;
+            ttsPromise = AudioManager.prefetchAudio(speech);
+            // Fire-and-forget — don't let TTS failures block the processing pipeline
+            AudioManager.playPrefetched(ttsPromise).catch(e =>
+                console.warn('[Game] TTS playback error (non-blocking):', e)
+            );
+            addTranscriptEntry('jones', speech);
+            removeThinkingIndicator();
+        });
+    } catch (err) {
+        console.error('[Game] callGamemaster threw:', err);
+        data = null;
+    }
 
     clearTimeout(safetyTimeout);
 
     if (!data) {
+        // Remove ALL thinking indicators (there may be more than one)
+        removeThinkingIndicator();
         removeThinkingIndicator();
         isProcessing = false;
+
+        // Show visible error so the user isn't left staring at a blank screen
+        addTranscriptEntry('jones', 'Having trouble connecting. Try tapping Send or speaking to retry.');
+
+        // Still process queued input even on failure
+        if (pendingTranscript) {
+            const queued = pendingTranscript;
+            pendingTranscript = null;
+            sendToGamemaster(queued);
+        }
         return;
     }
 
@@ -202,8 +231,8 @@ async function sendToGamemaster(transcript) {
     if (data.speech) {
         gameState.conversationHistory.push({ role: 'assistant', content: data.speech });
     }
-    if (gameState.conversationHistory.length > 12) {
-        gameState.conversationHistory = gameState.conversationHistory.slice(-12);
+    if (gameState.conversationHistory.length > 6) {
+        gameState.conversationHistory = gameState.conversationHistory.slice(-6);
     }
 
     if (data.actions && Array.isArray(data.actions)) {
@@ -220,7 +249,9 @@ async function sendToGamemaster(transcript) {
     if (data.speech && !speechHandled) {
         ttsPromise = AudioManager.prefetchAudio(data.speech);
         addTranscriptEntry('jones', data.speech);
-        AudioManager.playPrefetched(ttsPromise);
+        AudioManager.playPrefetched(ttsPromise).catch(e =>
+            console.warn('[Game] TTS playback error (non-blocking):', e)
+        );
     }
 
     // Safety net: if category is set but Claude didn't generate a clue yet
@@ -268,19 +299,35 @@ function executeAction(action) {
             updateCategoryDisplay();
             break;
 
-        case 'start_round':
+        case 'set_difficulty':
+            gameState.difficulty = action.difficulty;
+            break;
+
+        case 'start_round': {
+            // Server validates letter matching via tool use — this is a safety net only
+            const letter = (action.letter || '').toUpperCase();
+            const answer = (action.answer || '');
+            if (answer && letter && answer[0].toUpperCase() !== letter) {
+                console.warn(`[Game] Letter mismatch slipped through: "${answer}" for "${letter}" — skipping`);
+                break;
+            }
             gameState.roundNumber++;
             gameState.currentRound = {
-                letter: action.letter,
-                answer: action.answer,
+                letter: letter,
+                answer: answer,
                 hints: action.hints || [],
                 hintsRevealed: 0,
                 proximity: action.proximity || 'region',
                 nearbyLocation: action.nearbyLocation || null,
                 essay: action.essay || null
             };
+            // Track this answer so we never repeat it
+            if (answer && !gameState.previousAnswers.includes(answer)) {
+                gameState.previousAnswers.push(answer);
+            }
             updateRoundDisplay();
             break;
+        }
 
         case 'correct_guess': {
             const player = gameState.players.find(p =>
@@ -288,6 +335,17 @@ function executeAction(action) {
             );
             if (player) {
                 player.score += (action.points || 1);
+            }
+            updateScoreboard();
+            break;
+        }
+
+        case 'set_score': {
+            const targetPlayer = gameState.players.find(p =>
+                p.name.toLowerCase() === (action.player || '').toLowerCase()
+            );
+            if (targetPlayer && typeof action.score === 'number') {
+                targetPlayer.score = action.score;
             }
             updateScoreboard();
             break;
@@ -301,6 +359,17 @@ function executeAction(action) {
             if (typeof action.hintIndex === 'number') {
                 gameState.currentRound.hintsRevealed = action.hintIndex + 1;
                 updateHintDisplay();
+                // Hint penalty: deduct 1 point from the player who asked
+                // (apply to last speaker, or spread across all if unclear)
+                if (action.player) {
+                    const hintPlayer = gameState.players.find(p =>
+                        p.name.toLowerCase() === action.player.toLowerCase()
+                    );
+                    if (hintPlayer && hintPlayer.score > 0) {
+                        hintPlayer.score -= 1;
+                        updateScoreboard();
+                    }
+                }
             }
             break;
 
@@ -470,11 +539,13 @@ function startGame() {
     gameState.players = [];
     gameState.roundNumber = 0;
     gameState.category = null;
+    gameState.difficulty = null;
     gameState.currentRound = {
         letter: null, answer: null, hints: [], hintsRevealed: 0,
         proximity: null, nearbyLocation: null, essay: null
     };
     gameState.conversationHistory = [];
+    gameState.previousAnswers = [];
 
     // Start location tracking
     startLocationTracking();
@@ -497,6 +568,9 @@ function startGame() {
     // Hide round info
     const roundInfo = document.getElementById('round-info');
     if (roundInfo) roundInfo.classList.add('hidden');
+
+    // Show immediate loading feedback so the screen isn't blank
+    addTranscriptEntry('jones', 'Professor Jones is joining the trip...', true);
 
     // Start voice command listening
     if (AudioManager.hasSpeechRecognition && !AudioManager.muted) {
@@ -566,6 +640,10 @@ function speak(text) {
 function showOutOfCredits() {
     const modal = document.getElementById('out-of-credits');
     if (modal) modal.classList.remove('hidden');
+    // Also show in transcript so user sees it even if modal is obscured
+    removeThinkingIndicator();
+    removeThinkingIndicator();
+    addTranscriptEntry('jones', 'You\'re out of credits! Add more to keep playing.');
 }
 
 function hideOutOfCredits() {
@@ -755,11 +833,12 @@ function startHeartbeat() {
         if (gameActive &&
             AudioManager.hasSpeechRecognition &&
             !AudioManager.muted &&
-            !AudioManager.isListening) {
+            !AudioManager.isListening &&
+            !AudioManager.isSpeaking) {
             console.log('[Heartbeat] Recognition died, restarting command mode');
             AudioManager.startListening('command');
         }
-    }, 3000);
+    }, 5000); // Increased from 3s to 5s to reduce restart pressure
 }
 
 function stopHeartbeat() {
@@ -781,7 +860,8 @@ document.addEventListener('DOMContentLoaded', () => {
         command: (transcript) => handleVoiceInput(transcript),
         silence: () => {
             // Player stayed silent after Professor Jones spoke — auto-continue
-            if (!isProcessing) {
+            // Guard: don't fire if we're still processing, or if Jones is still speaking
+            if (!isProcessing && !AudioManager.isSpeaking) {
                 sendToGamemaster('[No response — player is silent]');
             }
         }

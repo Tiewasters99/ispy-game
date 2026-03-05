@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>I Spy Road Trip</title>
-    <link rel="stylesheet" href="css/styles.css?v=35">
+    <link rel="stylesheet" href="css/styles.css?v=49">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#2c3e50">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -29,8 +29,13 @@
 
     <!-- Setup Screen -->
     <div id="setup-screen" class="screen">
-        <div class="setup-header">
-            <h1>I Spy Road Trip</h1>
+        <div class="setup-hero">
+            <h1 class="setup-title">I Spy Road Trip</h1>
+            <p class="setup-subtitle">A voice-powered history game with Professor Jones</p>
+            <button id="start-game-btn" class="start-game-btn">Start Road Trip</button>
+        </div>
+
+        <div class="setup-meta">
             <div class="user-info">
                 <span id="credits-display">0 credits</span>
                 <button id="sign-out-btn" class="sign-out-btn">Sign Out</button>
@@ -43,8 +48,7 @@
             <button onclick="purchaseCredits('subscription')">Go Unlimited</button>
         </div>
 
-        <div class="setup-form">
-            <!-- Credit Purchase Section -->
+        <div class="setup-form credits-panel">
             <div class="credits-section">
                 <label>Get Credits</label>
                 <div class="credit-buttons">
@@ -60,10 +64,6 @@
                     </div>
                 </div>
             </div>
-
-            <hr class="divider">
-
-            <button id="start-game-btn" class="start-game-btn">Start Road Trip</button>
         </div>
     </div>
 
@@ -136,8 +136,8 @@
         </div>
     </div>
 
-    <script src="js/auth.js?v=35"></script>
-    <script src="js/audio.js?v=35"></script>
-    <script src="js/app.js?v=35"></script>
+    <script src="js/auth.js?v=49"></script>
+    <script src="js/audio.js?v=49"></script>
+    <script src="js/app.js?v=49"></script>
 </body>
 </html>
