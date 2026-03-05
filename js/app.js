@@ -35,6 +35,43 @@ let gameState = {
 
 let isProcessing = false;
 
+// --- Transcript Preprocessing ---
+// Voice input is messy — "Hi this is John, is it Selma?" needs to be split into
+// the player intro and the actual guess so classifyIntent and validateGuess work
+// on the right text. Raw transcript is still sent to Claude for player identification.
+
+function preprocessTranscript(raw) {
+    // Strip filler words from the front
+    let cleaned = raw
+        .replace(/^(hi|hello|hey|ok|okay|so|um|uh|well|like)[,\s]+/i, '')
+        .trim();
+
+    // Extract player name if present (keep it for Claude, strip for intent)
+    let playerName = null;
+    const introMatch = cleaned.match(/^(this is|i'm|my name is|it's)\s+(\w+)[,\s]*/i);
+    if (introMatch) {
+        playerName = introMatch[2];
+        cleaned = cleaned.slice(introMatch[0].length).trim();
+    }
+
+    // If compound ("this is John, is it Selma?"), take the last clause for intent
+    const clauses = cleaned.split(/[,;]\s*/);
+    const lastClause = clauses[clauses.length - 1].trim();
+
+    // Strip guess preamble to get bare answer for validation
+    const guessText = lastClause
+        .replace(/^(is it|i think it'?s|my guess is|i say|i'?ll guess|it'?s|gotta be|must be)\s+/i, '')
+        .trim();
+
+    return {
+        raw,
+        cleaned,
+        playerName,
+        lastClause,   // for classifyIntent
+        guessText     // for validateGuess (bare answer, no "is it" prefix)
+    };
+}
+
 // --- Intent Classification ---
 // Classifies player voice input so Claude gets a hint about what the player means.
 // Voice transcripts are messy — this helps route "yes" (to a hint offer) vs a guess.
@@ -304,14 +341,20 @@ async function sendToGamemaster(transcript) {
         addTranscriptEntry('player', transcript);
     }
 
-    // --- Classify intent and validate guesses ---
+    // --- Preprocess, classify intent, and validate guesses ---
     let annotatedTranscript = transcript;
     if (!isSystemMessage && gameState.phase === 'playing' && gameState.currentRound?.answer) {
-        const intent = classifyIntent(transcript);
+        const pp = preprocessTranscript(transcript);
+        const intent = classifyIntent(pp.lastClause);
 
-        // Check for correct guess deterministically
+        // Check for correct guess — use guessText (bare answer, no "is it" prefix)
         if (!gameState.currentRound.guessValidated && (intent === 'guess' || intent === 'probable_guess')) {
-            const result = validateGuess(transcript, gameState.currentRound.answer);
+            // Try multiple cleaned forms to catch "is it Selma", "Selma", full transcript
+            const answer = gameState.currentRound.answer;
+            const r1 = validateGuess(pp.guessText, answer);
+            const r2 = !r1.correct ? validateGuess(pp.lastClause, answer) : r1;
+            const r3 = !r2.correct ? validateGuess(transcript, answer) : r2;
+            const result = r3;
             if (result.correct) {
                 gameState.currentRound.guessValidated = true;
                 annotatedTranscript = `${transcript}\n[SYSTEM: CORRECT ANSWER. The guess matches "${gameState.currentRound.answer}". Celebrate, emit correct_guess (identify which player), then ask if they have questions before moving on.]`;
