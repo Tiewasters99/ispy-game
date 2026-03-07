@@ -311,8 +311,6 @@ function executeAction(action) {
                 player.score += (action.points || 1);
             }
             updateScoreboard();
-            // Pre-generate the next round in the background while essay plays
-            prefetchNextRound();
             break;
         }
 
@@ -363,8 +361,6 @@ function executeAction(action) {
 
         case 'reveal_answer':
             showAnswer();
-            // Pre-generate next round after reveal too
-            prefetchNextRound();
             break;
 
         case 'show_essay':
@@ -535,6 +531,12 @@ function applyRoundData(round) {
 
     updateRoundDisplay();
     updatePhaseUI();
+
+    // Immediately start generating the NEXT round in the background.
+    // Player will spend 30+ seconds guessing — plenty of time for Opus.
+    gameState.preloadedRound = null;
+    gameState.preloadPending = false;
+    prefetchNextRound();
 }
 
 // --- UI Update Functions ---
