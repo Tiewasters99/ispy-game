@@ -1,12 +1,16 @@
 // Vercel Serverless Function — Conversational Game Master ("Professor Jones")
-// Claude is the SOLE authority on game logic. The client is a thin UI layer.
-// Only deterministic guard: letter validation on round creation.
+// TIERED MODEL APPROACH:
+//   Opus 4 — round creation (reasoning quality matters)
+//   Sonnet 4 — conversation (speed matters, answer is already in state)
+// Client is a thin UI layer. Only deterministic guard: letter validation.
 
 import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@supabase/supabase-js';
 
-// --- System Prompt ---
-// This is the ONLY thing controlling game logic. It must be thorough.
+const MODEL_CONVERSATION = 'claude-sonnet-4-20250514';
+const MODEL_ROUND = 'claude-opus-4-20250514';
+
+// --- System Prompt (conversation only — no round creation instructions needed) ---
 
 const BASE_PROMPT = `You are Professor Jones — a witty, irreverent ex-academic who bailed on tenure because the world is more interesting than any lecture hall. You ride along on road trips, turning every mile into a game. You ARE the game master for "I SPY WITH MY LITTLE EYE."
 
@@ -26,7 +30,7 @@ Phase 1 — SETUP:
 5. Set category with set_category action.
 6. Ask for difficulty: easy (household names), medium (mix), hard (deep cuts). Default to medium if unclear.
 7. Set difficulty with set_difficulty action.
-8. Immediately deliver the first clue by calling the create_round tool.
+8. After setting difficulty, use the request_new_round action so the system generates a round.
 
 Phase 2 — PLAYING:
 - Each round: you present a clue, players guess.
@@ -39,12 +43,8 @@ Phase 3 — BETWEEN ROUNDS:
 - After a correct guess: celebrate briefly (one sentence), then deliver the essay about the answer.
 - Use show_essay action to display the essay text.
 - Then ask if they're ready for the next round.
-- When they say yes (or equivalent), call create_round for a new round.
-
-=== CREATING ROUNDS ===
-- ALWAYS use the create_round tool. Never announce a letter without calling it.
-- Speech MUST begin with "I spy with my little eye something that begins with the letter [X]."
-- Follow with a brief, witty teaser (1 sentence max).
+- When they say yes (or equivalent), use the request_new_round action.
+- IMPORTANT: The next round may already be pre-loaded. If the state shows a pre-loaded round, use deliver_preloaded_round action instead of request_new_round. Announce it with "I spy with my little eye something that begins with the letter [X]." and a brief teaser.
 
 === ANSWER VALIDATION ===
 - The ONLY active letter/answer is in CURRENT GAME STATE below.
@@ -93,7 +93,11 @@ set_category: {"type":"set_category","category":"history"}
 set_difficulty: {"type":"set_difficulty","difficulty":"medium"}
   Set difficulty: "easy", "medium", or "hard".
 
-start_round: NEVER emit this directly — it's generated from the create_round tool.
+request_new_round: {"type":"request_new_round"}
+  Ask the system to generate a new round. Use when setup is complete or player wants next round AND no pre-loaded round is available.
+
+deliver_preloaded_round: {"type":"deliver_preloaded_round"}
+  Use when the CURRENT GAME STATE shows a pre-loaded round is available. Announce it with the "I spy..." formula. The system will activate the pre-loaded round data.
 
 correct_guess: {"type":"correct_guess","player":"Sarah","points":1}
   Award points for a correct guess. Trust your own judgment.
@@ -129,13 +133,13 @@ Multiple actions are allowed in one response. For example, after a correct guess
 
 /**
  * Build the dynamic system prompt with full game state injected.
- * This is the SINGLE SOURCE OF TRUTH for Claude.
  */
 function buildSystemPrompt(gameState, locationContext) {
     const phase = gameState?.phase || 'setup_intro';
     const round = gameState?.currentRound || {};
     const players = gameState?.players || [];
     const previousAnswers = gameState?.previousAnswers || [];
+    const preloaded = gameState?.preloadedRound || null;
 
     let stateBlock = `\n\n=== CURRENT GAME STATE (authoritative — trust this over conversation history) ===
 Phase: ${phase}
@@ -147,10 +151,19 @@ Difficulty: ${gameState?.difficulty || 'not set (default medium)'}`;
         stateBlock += `
 Current letter: ${round.letter}
 Current answer: ${round.answer}
+Hints available: ${(round.hints || []).length - (round.hintsRevealed || 0)} remaining
 Hints revealed: ${round.hintsRevealed || 0}/3`;
     } else {
         stateBlock += `
 Current round: none active`;
+    }
+
+    if (preloaded) {
+        stateBlock += `
+PRE-LOADED NEXT ROUND AVAILABLE: YES (letter "${preloaded.letter}") — use deliver_preloaded_round action when the player is ready`;
+    } else {
+        stateBlock += `
+Pre-loaded next round: NO — use request_new_round action when needed`;
     }
 
     if (players.length > 0) {
@@ -176,53 +189,7 @@ Used answers (NEVER repeat): ${previousAnswers.join(', ')}`;
     return BASE_PROMPT + stateBlock;
 }
 
-// --- Tool definition for structured round generation ---
-const TOOLS = [
-    {
-        name: 'create_round',
-        description: 'Create a new I Spy round with a letter, answer, hints, and essay. The answer MUST start with the given letter. The system will validate this automatically.',
-        input_schema: {
-            type: 'object',
-            properties: {
-                letter: {
-                    type: 'string',
-                    description: 'A single uppercase letter (A-Z) for this round'
-                },
-                answer: {
-                    type: 'string',
-                    description: 'The answer that players must guess. MUST start with the given letter.'
-                },
-                hints: {
-                    type: 'array',
-                    items: { type: 'string' },
-                    description: 'Exactly 3 hints, ordered from vague to specific',
-                    minItems: 3,
-                    maxItems: 3
-                },
-                essay: {
-                    type: 'string',
-                    description: 'A 2-3 sentence fun fact essay about the answer'
-                },
-                proximity: {
-                    type: 'string',
-                    enum: ['here', 'nearby', 'region'],
-                    description: 'How close the answer is to the players GPS location'
-                },
-                nearbyLocation: {
-                    type: 'string',
-                    description: 'If proximity is nearby, the name of the nearby location'
-                },
-                speech: {
-                    type: 'string',
-                    description: 'What Professor Jones says when presenting this clue. MUST begin with "I spy with my little eye something that begins with the letter [X]." followed by a brief teaser.'
-                }
-            },
-            required: ['letter', 'answer', 'hints', 'essay', 'proximity', 'speech']
-        }
-    }
-];
-
-// --- Main handler ---
+// --- Main handler (conversation — Sonnet for speed) ---
 
 export default async function handler(req, res) {
     if (req.method !== 'POST') {
@@ -246,12 +213,9 @@ export default async function handler(req, res) {
         process.env.SUPABASE_SERVICE_KEY
     );
 
-    // Determine credit cost: 10 for round-starting calls, 3 for follow-ups
-    const isRoundStart = gameState?.phase === 'playing' &&
-        (!gameState.currentRound?.answer || transcript === '[Start next round]' || transcript === '[Game session started]');
-    const creditCost = isRoundStart ? 10 : 3;
+    const creditCost = 3;
 
-    // Check user credits and deduct if userId provided
+    // Check user credits
     let remainingCredits = null;
     if (userId) {
         const { data: user, error } = await supabase
@@ -294,54 +258,39 @@ export default async function handler(req, res) {
         locationContext = `GPS: ${location.latitude}, ${location.longitude}`;
     }
 
-    const previousAnswers = gameState?.previousAnswers || [];
-
-    // Build dynamic system prompt with full state
+    // Build dynamic system prompt
     const systemPrompt = buildSystemPrompt(gameState, locationContext);
 
-    // Build messages: last 4 messages (2 exchanges) for conversational continuity
-    // e.g. "want a hint?" → "yes" works because both messages are in history
+    // Build messages: last 4 messages (2 exchanges)
     const messages = [];
     const history = (conversationHistory || []).slice(-4);
     for (const entry of history) {
-        messages.push({
-            role: entry.role,
-            content: entry.content
-        });
+        messages.push({ role: entry.role, content: entry.content });
     }
-
-    // Current user message — raw transcript, no annotations
-    messages.push({
-        role: 'user',
-        content: transcript
-    });
+    messages.push({ role: 'user', content: transcript });
 
     const client = new Anthropic({ apiKey });
 
-    // Set NDJSON headers
+    // NDJSON headers
     res.setHeader('Content-Type', 'application/x-ndjson');
     res.setHeader('Cache-Control', 'no-cache');
 
     try {
-        // --- STREAMING: extract speech as early as possible for TTS ---
+        // --- STREAMING with Sonnet for speed ---
         const stream = await client.messages.stream({
-            model: 'claude-sonnet-4-20250514',
-            max_tokens: 1024,
+            model: MODEL_CONVERSATION,
+            max_tokens: 512,
             system: systemPrompt,
-            messages: messages,
-            tools: TOOLS
+            messages: messages
         });
 
         let fullText = '';
         let speechSent = false;
-        let currentBlockType = null; // 'text' or 'tool_use'
 
-        // Listen for text deltas — try to extract "speech" field incrementally
         stream.on('text', (textDelta) => {
-            if (currentBlockType !== 'text') return;
             fullText += textDelta;
 
-            // Try to extract speech early: look for "speech":"..." pattern
+            // Extract speech early for TTS prefetch
             if (!speechSent) {
                 const speechMatch = fullText.match(/"speech"\s*:\s*"((?:[^"\\]|\\.)*)"/);
                 if (speechMatch) {
@@ -357,17 +306,11 @@ export default async function handler(req, res) {
             }
         });
 
-        stream.on('contentBlockStart', (block) => {
-            currentBlockType = block.type;
-        });
-
-        // Wait for the full response
         const response = await stream.finalMessage();
 
-        // Process the complete response — text blocks + tool_use blocks
+        // Parse complete response
         let speech = '';
         let actions = [];
-        let toolUseBlock = null;
 
         for (const block of response.content) {
             if (block.type === 'text') {
@@ -376,71 +319,6 @@ export default async function handler(req, res) {
                     if (parsed.speech) speech = parsed.speech;
                     if (parsed.actions) actions = parsed.actions;
                 }
-            } else if (block.type === 'tool_use' && block.name === 'create_round') {
-                toolUseBlock = block;
-            }
-        }
-
-        // If Claude called create_round, validate and convert to start_round action
-        if (toolUseBlock) {
-            const round = toolUseBlock.input;
-            const letter = (round.letter || '').toUpperCase();
-            const answer = round.answer || '';
-
-            // DETERMINISTIC VALIDATION: answer must start with the letter
-            if (answer && letter && answer[0].toUpperCase() === letter) {
-                actions.push({
-                    type: 'start_round',
-                    letter: letter,
-                    answer: answer,
-                    hints: round.hints || [],
-                    essay: round.essay || '',
-                    proximity: round.proximity || 'region',
-                    nearbyLocation: round.nearbyLocation || null
-                });
-
-                if (!speech && round.speech) {
-                    speech = round.speech;
-                }
-            } else {
-                console.warn(`[Gamemaster] Letter mismatch: "${answer}" doesn't start with "${letter}". Retrying...`);
-
-                const retryResult = await retryRoundGeneration(client, letter, previousAnswers, gameState, locationContext);
-                if (retryResult) {
-                    actions.push({
-                        type: 'start_round',
-                        letter: retryResult.letter,
-                        answer: retryResult.answer,
-                        hints: retryResult.hints || [],
-                        essay: retryResult.essay || '',
-                        proximity: retryResult.proximity || 'region',
-                        nearbyLocation: retryResult.nearbyLocation || null
-                    });
-                    if (!speech && retryResult.speech) {
-                        speech = retryResult.speech;
-                    }
-                } else {
-                    speech = speech || "Hmm, let me try a different letter.";
-                    const usedLetters = previousAnswers.map(a => a[0]?.toUpperCase()).filter(Boolean);
-                    const available = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').filter(l => !usedLetters.includes(l));
-                    const fallbackLetter = available.length > 0
-                        ? available[Math.floor(Math.random() * available.length)]
-                        : 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[Math.floor(Math.random() * 26)];
-
-                    const fallbackResult = await retryRoundGeneration(client, fallbackLetter, previousAnswers, gameState, locationContext);
-                    if (fallbackResult) {
-                        actions.push({
-                            type: 'start_round',
-                            letter: fallbackResult.letter,
-                            answer: fallbackResult.answer,
-                            hints: fallbackResult.hints || [],
-                            essay: fallbackResult.essay || '',
-                            proximity: fallbackResult.proximity || 'region',
-                            nearbyLocation: fallbackResult.nearbyLocation || null
-                        });
-                        speech = fallbackResult.speech || speech;
-                    }
-                }
             }
         }
 
@@ -448,12 +326,11 @@ export default async function handler(req, res) {
             actions = [{ type: 'no_action' }];
         }
 
-        // Send speech now if streaming didn't catch it (tool_use responses, etc.)
+        // Send speech if streaming didn't catch it
         if (speech && !speechSent) {
             res.write(JSON.stringify({ type: 'speech', speech }) + '\n');
         }
 
-        // Send complete response
         res.write(JSON.stringify({
             type: 'complete',
             speech: speech,
@@ -462,11 +339,10 @@ export default async function handler(req, res) {
         }) + '\n');
         return res.end();
     } catch (error) {
-        console.error('Gamemaster error:', error?.message || error, error?.status || '');
+        console.error('Gamemaster error:', error?.message || error);
         if (!res.headersSent) {
             return res.status(500).json({
                 error: 'Failed to process',
-                detail: error?.message || String(error),
                 speech: "Sorry, I lost my train of thought. Say that again?",
                 actions: [{ type: 'no_action' }]
             });
@@ -481,52 +357,7 @@ export default async function handler(req, res) {
 }
 
 /**
- * Retry round generation with a specific letter using forced tool_choice.
- * Returns validated round data or null.
- */
-async function retryRoundGeneration(client, letter, previousAnswers, gameState, locationContext) {
-    const prevAnswersList = previousAnswers.length > 0 ? previousAnswers.join(', ') : 'none';
-    const category = gameState?.category || 'general';
-    const difficulty = gameState?.difficulty || 'medium';
-
-    const retryMessages = [
-        {
-            role: 'user',
-            content: `Generate an I Spy round for the letter "${letter}". Category: ${category}. Difficulty: ${difficulty}. Location: ${locationContext || 'Unknown'}. Already used answers (do NOT repeat): ${prevAnswersList}. The answer MUST start with the letter "${letter}". Call the create_round tool.`
-        }
-    ];
-
-    try {
-        const retryResponse = await client.messages.create({
-            model: 'claude-sonnet-4-20250514',
-            max_tokens: 512,
-            system: 'You generate I Spy game rounds. Always use the create_round tool. The answer MUST start with the specified letter. Begin your speech with "I spy with my little eye something that begins with the letter [X]." followed by a brief teaser.',
-            messages: retryMessages,
-            tools: TOOLS,
-            tool_choice: { type: 'tool', name: 'create_round' }
-        });
-
-        for (const block of retryResponse.content) {
-            if (block.type === 'tool_use' && block.name === 'create_round') {
-                const round = block.input;
-                const roundLetter = (round.letter || '').toUpperCase();
-                const roundAnswer = round.answer || '';
-
-                if (roundAnswer && roundLetter && roundAnswer[0].toUpperCase() === roundLetter) {
-                    return { ...round, letter: roundLetter };
-                }
-                console.warn(`[Gamemaster] Retry also mismatched: "${roundAnswer}" for letter "${roundLetter}"`);
-            }
-        }
-    } catch (err) {
-        console.error('[Gamemaster] Retry failed:', err?.message || err);
-    }
-    return null;
-}
-
-/**
  * Try to parse JSON from Claude's text response.
- * Handles both clean JSON and JSON embedded in other text.
  */
 function tryParseJSON(text) {
     if (!text || !text.trim()) return null;
@@ -535,11 +366,7 @@ function tryParseJSON(text) {
     } catch {
         const match = text.match(/\{[\s\S]*\}/);
         if (match) {
-            try {
-                return JSON.parse(match[0]);
-            } catch {
-                return null;
-            }
+            try { return JSON.parse(match[0]); } catch { return null; }
         }
         return null;
     }

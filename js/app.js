@@ -17,6 +17,8 @@ let gameState = {
         hintsRevealed: 0,
         essay: null
     },
+    preloadedRound: null,     // next round pre-generated in background (Opus 4)
+    preloadPending: false,    // true while a prefetch is in flight
     conversationHistory: [],  // last 4 messages (2 exchanges)
     previousAnswers: [],
     location: {
@@ -61,6 +63,9 @@ async function callGamemaster(transcript, onSpeech) {
                     category: gameState.category,
                     difficulty: gameState.difficulty,
                     previousAnswers: gameState.previousAnswers,
+                    preloadedRound: gameState.preloadedRound
+                        ? { letter: gameState.preloadedRound.letter }
+                        : null,
                     location: {
                         latitude: gameState.location.latitude,
                         longitude: gameState.location.longitude,
@@ -292,28 +297,8 @@ function executeAction(action) {
             break;
 
         case 'start_round': {
-            // Server already validated letter match — this is a safety net only
-            const letter = (action.letter || '').toUpperCase();
-            const answer = (action.answer || '');
-            if (answer && letter && answer[0].toUpperCase() !== letter) {
-                console.warn(`[Game] Letter mismatch slipped through: "${answer}" for "${letter}" — skipping`);
-                break;
-            }
-            gameState.phase = 'playing';
-            gameState.roundNumber++;
-            gameState.currentRound = {
-                letter: letter,
-                answer: answer,
-                hints: action.hints || [],
-                hintsRevealed: 0,
-                essay: action.essay || null
-            };
-            // Track this answer so we never repeat it
-            if (answer && !gameState.previousAnswers.includes(answer)) {
-                gameState.previousAnswers.push(answer);
-            }
-            updateRoundDisplay();
-            updatePhaseUI();
+            // Legacy path — rounds now come via applyRoundData, but keep for safety
+            applyRoundData(action);
             break;
         }
 
@@ -326,6 +311,8 @@ function executeAction(action) {
                 player.score += (action.points || 1);
             }
             updateScoreboard();
+            // Pre-generate the next round in the background while essay plays
+            prefetchNextRound();
             break;
         }
 
@@ -361,8 +348,23 @@ function executeAction(action) {
             }
             break;
 
+        case 'request_new_round':
+            // Claude wants a new round — use preloaded if available, otherwise fetch
+            activateOrFetchRound();
+            break;
+
+        case 'deliver_preloaded_round':
+            // Claude says "I spy..." and tells us to activate the preloaded round
+            if (gameState.preloadedRound) {
+                applyRoundData(gameState.preloadedRound);
+                gameState.preloadedRound = null;
+            }
+            break;
+
         case 'reveal_answer':
             showAnswer();
+            // Pre-generate next round after reveal too
+            prefetchNextRound();
             break;
 
         case 'show_essay':
@@ -377,6 +379,162 @@ function executeAction(action) {
         default:
             break;
     }
+}
+
+// --- Round Pre-Generation (Opus 4, background) ---
+
+async function prefetchNextRound() {
+    if (gameState.preloadedRound || gameState.preloadPending) return;
+    gameState.preloadPending = true;
+
+    try {
+        const user = typeof supabase !== 'undefined' ? supabase.auth.getUser() : null;
+
+        const response = await fetch('/api/generate-round', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                userId: user?.id || null,
+                category: gameState.category,
+                difficulty: gameState.difficulty,
+                previousAnswers: gameState.previousAnswers,
+                location: {
+                    latitude: gameState.location.latitude,
+                    longitude: gameState.location.longitude,
+                    city: gameState.location.city,
+                    county: gameState.location.county,
+                    region: gameState.location.region
+                }
+            })
+        });
+
+        if (!response.ok) {
+            console.warn('[Prefetch] Failed:', response.status);
+            gameState.preloadPending = false;
+            return;
+        }
+
+        const round = await response.json();
+        gameState.preloadedRound = round;
+        gameState.preloadPending = false;
+        console.log('[Prefetch] Next round ready:', round.letter, round.answer);
+
+        if (round.remainingCredits !== null && round.remainingCredits !== undefined) {
+            updateGameCreditsDisplay(round.remainingCredits);
+        }
+    } catch (err) {
+        console.warn('[Prefetch] Error:', err);
+        gameState.preloadPending = false;
+    }
+}
+
+/**
+ * Activate a pre-loaded round or fetch one on demand.
+ * Called when Claude emits request_new_round.
+ */
+async function activateOrFetchRound() {
+    if (gameState.preloadedRound) {
+        // Instant — round was pre-generated while essay played
+        const round = gameState.preloadedRound;
+        gameState.preloadedRound = null;
+        applyRoundData(round);
+        // Announce it — play the speech that came with the round
+        if (round.speech) {
+            addTranscriptEntry('jones', round.speech);
+            const tts = AudioManager.prefetchAudio(round.speech);
+            AudioManager.playPrefetched(tts).catch(e =>
+                console.warn('[Game] TTS error:', e)
+            );
+        }
+        return;
+    }
+
+    // No preloaded round — fetch one now (blocking but with loading feedback)
+    addTranscriptEntry('jones', 'Let me think of a good one...', true);
+
+    try {
+        const user = typeof supabase !== 'undefined' ? supabase.auth.getUser() : null;
+
+        const response = await fetch('/api/generate-round', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                userId: user?.id || null,
+                category: gameState.category,
+                difficulty: gameState.difficulty,
+                previousAnswers: gameState.previousAnswers,
+                location: {
+                    latitude: gameState.location.latitude,
+                    longitude: gameState.location.longitude,
+                    city: gameState.location.city,
+                    county: gameState.location.county,
+                    region: gameState.location.region
+                }
+            })
+        });
+
+        removeThinkingIndicator();
+
+        if (response.status === 402) {
+            showOutOfCredits();
+            return;
+        }
+
+        if (!response.ok) {
+            addTranscriptEntry('jones', 'Had trouble coming up with one. Try asking me again.');
+            return;
+        }
+
+        const round = await response.json();
+        applyRoundData(round);
+
+        if (round.speech) {
+            addTranscriptEntry('jones', round.speech);
+            const tts = AudioManager.prefetchAudio(round.speech);
+            AudioManager.playPrefetched(tts).catch(e =>
+                console.warn('[Game] TTS error:', e)
+            );
+        }
+
+        if (round.remainingCredits !== null && round.remainingCredits !== undefined) {
+            updateGameCreditsDisplay(round.remainingCredits);
+        }
+    } catch (err) {
+        removeThinkingIndicator();
+        addTranscriptEntry('jones', 'Having trouble. Try saying "next round" again.');
+        console.error('[Game] On-demand round fetch failed:', err);
+    }
+}
+
+/**
+ * Apply round data to game state and update UI.
+ */
+function applyRoundData(round) {
+    const letter = (round.letter || '').toUpperCase();
+    const answer = round.answer || '';
+
+    // Safety: validate letter match
+    if (answer && letter && answer[0].toUpperCase() !== letter) {
+        console.warn(`[Game] Letter mismatch: "${answer}" for "${letter}" — skipping`);
+        return;
+    }
+
+    gameState.phase = 'playing';
+    gameState.roundNumber++;
+    gameState.currentRound = {
+        letter: letter,
+        answer: answer,
+        hints: round.hints || [],
+        hintsRevealed: 0,
+        essay: round.essay || null
+    };
+
+    if (answer && !gameState.previousAnswers.includes(answer)) {
+        gameState.previousAnswers.push(answer);
+    }
+
+    updateRoundDisplay();
+    updatePhaseUI();
 }
 
 // --- UI Update Functions ---
@@ -521,6 +679,8 @@ function startGame() {
     gameState.currentRound = {
         letter: null, answer: null, hints: [], hintsRevealed: 0, essay: null
     };
+    gameState.preloadedRound = null;
+    gameState.preloadPending = false;
     gameState.conversationHistory = [];
     gameState.previousAnswers = [];
 
