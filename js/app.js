@@ -1,27 +1,24 @@
-// I Spy Road Trip — Conversational Game Master Client
-// All game logic handled by Claude as Professor Jones via /api/gamemaster
+// I Spy Road Trip — Thin Client
+// Claude (via /api/gamemaster) is the SOLE authority on game logic.
+// This file: renders UI, captures voice, sends raw transcripts, executes actions.
+// NO intent classification, NO guess validation, NO answer pool, NO auto-advance.
 
-// Game State
+// --- Game State ---
 let gameState = {
     phase: 'setup_intro',
     players: [],
     roundNumber: 0,
     category: null,
-    difficulty: null, // 'easy' | 'medium' | 'hard'
+    difficulty: null,
     currentRound: {
         letter: null,
         answer: null,
         hints: [],
         hintsRevealed: 0,
-        proximity: null,
-        nearbyLocation: null,
-        essay: null,
-        guessValidated: false // true when validateGuess() confirmed a correct answer this round
+        essay: null
     },
-    conversationHistory: [],
-    previousAnswers: [], // all answers from this session, to prevent repeats
-    answerPool: [], // pre-generated answers for instant round starts
-    poolLoading: false, // true while fetching a new pool batch
+    conversationHistory: [],  // last 4 messages (2 exchanges)
+    previousAnswers: [],
     location: {
         latitude: null,
         longitude: null,
@@ -34,162 +31,6 @@ let gameState = {
 };
 
 let isProcessing = false;
-
-// --- Transcript Preprocessing ---
-// Voice input is messy — "Hi this is John, is it Selma?" needs to be split into
-// the player intro and the actual guess so classifyIntent and validateGuess work
-// on the right text. Raw transcript is still sent to Claude for player identification.
-
-function preprocessTranscript(raw) {
-    // Strip filler words from the front
-    let cleaned = raw
-        .replace(/^(hi|hello|hey|ok|okay|so|um|uh|well|like)[,\s]+/i, '')
-        .trim();
-
-    // Extract player name if present (keep it for Claude, strip for intent)
-    let playerName = null;
-    const introMatch = cleaned.match(/^(this is|i'm|my name is|it's)\s+(\w+)[,\s]*/i);
-    if (introMatch) {
-        playerName = introMatch[2];
-        cleaned = cleaned.slice(introMatch[0].length).trim();
-    }
-
-    // If compound ("this is John, is it Selma?"), take the last clause for intent
-    const clauses = cleaned.split(/[,;]\s*/);
-    const lastClause = clauses[clauses.length - 1].trim();
-
-    // Strip guess preamble to get bare answer for validation
-    const guessText = lastClause
-        .replace(/^(is it|i think it'?s|my guess is|i say|i'?ll guess|it'?s|gotta be|must be)\s+/i, '')
-        .trim();
-
-    return {
-        raw,
-        cleaned,
-        playerName,
-        lastClause,   // for classifyIntent
-        guessText     // for validateGuess (bare answer, no "is it" prefix)
-    };
-}
-
-// --- Intent Classification ---
-// Classifies player voice input so Claude gets a hint about what the player means.
-// Voice transcripts are messy — this helps route "yes" (to a hint offer) vs a guess.
-
-function classifyIntent(transcript) {
-    const t = transcript.toLowerCase().trim();
-
-    // Skip/give up
-    if (/\b(skip|give up|pass|next|move on)\b/.test(t))
-        return 'skip';
-
-    // Explicit hint request
-    if (/\b(hint|clue|help me|stuck|don'?t know)\b/.test(t))
-        return 'hint_request';
-
-    // Question (has question mark or starts with question word)
-    if (t.includes('?') || /^(who|what|where|when|why|how|is|are|was|were|do|does|did|can|could|would|tell me about)\b/.test(t))
-        return 'question';
-
-    // Explicit guess patterns
-    if (/\b(is it|i think|my (guess|answer)|i say|it'?s|gotta be|must be|i'?ll guess)\b/.test(t))
-        return 'guess';
-
-    // "yes"/"no"/"sure"/"nope" — affirmation/denial (context-dependent)
-    if (/^(yes|yeah|yep|sure|ok|okay|no|nah|nope|not yet)$/i.test(t))
-        return 'response';
-
-    // Short phrase (1-4 words, no question mark) — likely a guess during active round
-    if (t.split(/\s+/).length <= 4)
-        return 'probable_guess';
-
-    return 'conversation';
-}
-
-// --- Deterministic Guess Validation ---
-// Checks player guesses against the current answer in code, so Claude can't
-// accept wrong answers or reject correct ones.
-
-function validateGuess(guess, correctAnswer) {
-    const normalize = s => s.toLowerCase().trim().replace(/[^a-z0-9\s]/g, '');
-    const g = normalize(guess);
-    const a = normalize(correctAnswer);
-
-    if (!g || !a) return { correct: false };
-
-    // Exact match
-    if (g === a) return { correct: true, reason: 'exact' };
-
-    // Handle common articles ("the selma march" vs "selma march")
-    const stripped = a.replace(/^(the|a|an)\s+/i, '');
-    if (g === normalize(stripped)) return { correct: true, reason: 'article_stripped' };
-
-    // Guess without articles matching answer without articles
-    const gStripped = g.replace(/^(the|a|an)\s+/i, '');
-    if (gStripped === normalize(stripped)) return { correct: true, reason: 'article_stripped' };
-
-    // For multi-word answers: all key words (>3 chars) present in guess
-    const keyWords = normalize(stripped).split(/\s+/).filter(w => w.length > 3);
-    if (keyWords.length > 1 && keyWords.every(w => g.includes(w))) {
-        return { correct: true, reason: 'all_keywords' };
-    }
-
-    return { correct: false };
-}
-
-// --- Answer Pool Management ---
-// Pre-generates a batch of answers so rounds start instantly.
-
-async function fetchAnswerPool() {
-    if (gameState.poolLoading) return;
-    gameState.poolLoading = true;
-
-    try {
-        const response = await fetch('/api/generate-pool', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                category: gameState.category,
-                difficulty: gameState.difficulty,
-                location: {
-                    city: gameState.location.city,
-                    county: gameState.location.county,
-                    region: gameState.location.region
-                },
-                previousAnswers: gameState.previousAnswers
-            })
-        });
-
-        if (response.ok) {
-            const data = await response.json();
-            if (data.pool && data.pool.length > 0) {
-                // Append to existing pool (don't replace — may have unused entries)
-                gameState.answerPool = gameState.answerPool.concat(data.pool);
-                console.log(`[Pool] Loaded ${data.pool.length} answers, total pool: ${gameState.answerPool.length}`);
-            }
-        } else {
-            console.warn('[Pool] Failed to fetch:', response.status);
-        }
-    } catch (err) {
-        console.warn('[Pool] Fetch error:', err);
-    }
-
-    gameState.poolLoading = false;
-}
-
-function drawFromPool() {
-    if (gameState.answerPool.length === 0) return null;
-
-    // Take the first available answer
-    const entry = gameState.answerPool.shift();
-
-    // If pool is running low (<=2 left), trigger a background refill
-    if (gameState.answerPool.length <= 2 && !gameState.poolLoading) {
-        fetchAnswerPool();
-    }
-
-    return entry;
-}
 
 // DOM Elements
 const setupScreen = document.getElementById('setup-screen');
@@ -228,7 +69,7 @@ async function callGamemaster(transcript, onSpeech) {
                         region: gameState.location.region
                     }
                 },
-                conversationHistory: gameState.conversationHistory.slice(-2),
+                conversationHistory: gameState.conversationHistory.slice(-4),
                 transcript: transcript
             })
         });
@@ -335,92 +176,13 @@ async function sendToGamemaster(transcript) {
         }
     }, 35000);
 
-    // Show thinking indicator (hide internal system messages from transcript)
+    // Show player's message in transcript (hide internal system messages)
     const isSystemMessage = transcript.startsWith('[');
     if (!isSystemMessage) {
         addTranscriptEntry('player', transcript);
     }
 
-    // --- Preprocess, classify intent, and validate guesses ---
-    let annotatedTranscript = transcript;
-    if (!isSystemMessage && gameState.phase === 'playing' && gameState.currentRound?.answer) {
-        const pp = preprocessTranscript(transcript);
-        const intent = classifyIntent(pp.lastClause);
-
-        // Check for correct guess — use guessText (bare answer, no "is it" prefix)
-        if (!gameState.currentRound.guessValidated && (intent === 'guess' || intent === 'probable_guess')) {
-            // Try multiple cleaned forms to catch "is it Selma", "Selma", full transcript
-            const answer = gameState.currentRound.answer;
-            const r1 = validateGuess(pp.guessText, answer);
-            const r2 = !r1.correct ? validateGuess(pp.lastClause, answer) : r1;
-            const r3 = !r2.correct ? validateGuess(transcript, answer) : r2;
-            const result = r3;
-            if (result.correct) {
-                gameState.currentRound.guessValidated = true;
-                annotatedTranscript = `${transcript}\n[SYSTEM: CORRECT ANSWER. The guess matches "${gameState.currentRound.answer}". Celebrate, emit correct_guess (identify which player), then ask if they have questions before moving on.]`;
-            } else {
-                annotatedTranscript = `${transcript}\n[SYSTEM: Intent=${intent}. This is a guess attempt — evaluate against the answer "${gameState.currentRound.answer}".]`;
-            }
-        } else if (intent === 'hint_request') {
-            annotatedTranscript = `${transcript}\n[SYSTEM: Intent=hint_request. Player wants a HINT, not the answer. Use reveal_hint.]`;
-        } else if (intent === 'skip') {
-            annotatedTranscript = `${transcript}\n[SYSTEM: Intent=skip. Player wants to skip/give up. Reveal answer and essay.]`;
-        } else if (intent !== 'conversation' && intent !== 'response') {
-            annotatedTranscript = `${transcript}\n[SYSTEM: Intent=${intent}.]`;
-        }
-    }
-
-    // --- Pool-based round injection ---
-    // If it's time for a new round and we have a pre-generated answer, use it.
-    // Apply the round data client-side and tell Claude to just announce it.
-    let pooledRound = null;
-    const isNextRoundTrigger = isSystemMessage && (
-        transcript === '[Start next round]' ||
-        transcript === '[Game session started]' ||
-        transcript.includes('generate the I Spy clue')
-    );
-    const playerWantsNext = !isSystemMessage && gameState.phase === 'playing' &&
-        !gameState.currentRound?.answer &&
-        classifyIntent(transcript) !== 'question';
-
-    if ((isNextRoundTrigger || playerWantsNext) && gameState.answerPool.length > 0) {
-        pooledRound = drawFromPool();
-        if (pooledRound) {
-            // Apply the round immediately — UI updates now
-            executeAction({
-                type: 'start_round',
-                letter: pooledRound.letter,
-                answer: pooledRound.answer,
-                hints: pooledRound.hints,
-                essay: pooledRound.essay,
-                proximity: pooledRound.proximity || 'region'
-            });
-
-            // If pool entry has pre-generated speech, skip the API call entirely
-            if (pooledRound.speech) {
-                clearTimeout(safetyTimeout);
-                addTranscriptEntry('jones', pooledRound.speech);
-                AudioManager.speak(pooledRound.speech);
-                gameState.conversationHistory.push({ role: 'user', content: transcript });
-                gameState.conversationHistory.push({ role: 'assistant', content: pooledRound.speech });
-                if (gameState.conversationHistory.length > 2) {
-                    gameState.conversationHistory = gameState.conversationHistory.slice(-2);
-                }
-                isProcessing = false;
-                if (pendingTranscript) {
-                    const queued = pendingTranscript;
-                    pendingTranscript = null;
-                    sendToGamemaster(queued);
-                }
-                return;
-            }
-
-            // No speech in pool entry — ask Claude to announce it
-            annotatedTranscript = `[SYSTEM: A new round has started. Letter: ${pooledRound.letter}. DO NOT call create_round — the round is already set. Announce it with: "I spy with my little eye something that begins with the letter ${pooledRound.letter}." Then add a brief teaser. Speech only, no start_round action.]`;
-        }
-    }
-
-    // Always show thinking indicator — even for system messages, so the UI never looks dead
+    // Show thinking indicator
     addTranscriptEntry('jones', '...', true);
 
     let ttsPromise = null;
@@ -428,10 +190,10 @@ async function sendToGamemaster(transcript) {
 
     let data;
     try {
-        data = await callGamemaster(annotatedTranscript, (speech) => {
+        data = await callGamemaster(transcript, (speech) => {
+            // Speech line arrived early — start TTS immediately
             speechHandled = true;
             ttsPromise = AudioManager.prefetchAudio(speech);
-            // Fire-and-forget — don't let TTS failures block the processing pipeline
             AudioManager.playPrefetched(ttsPromise).catch(e =>
                 console.warn('[Game] TTS playback error (non-blocking):', e)
             );
@@ -446,15 +208,10 @@ async function sendToGamemaster(transcript) {
     clearTimeout(safetyTimeout);
 
     if (!data) {
-        // Remove ALL thinking indicators (there may be more than one)
         removeThinkingIndicator();
         removeThinkingIndicator();
         isProcessing = false;
-
-        // Show visible error so the user isn't left staring at a blank screen
         addTranscriptEntry('jones', 'Having trouble connecting. Try tapping Send or speaking to retry.');
-
-        // Still process queued input even on failure
         if (pendingTranscript) {
             const queued = pendingTranscript;
             pendingTranscript = null;
@@ -466,21 +223,23 @@ async function sendToGamemaster(transcript) {
     removeThinkingIndicator();
     retryCount = 0;
 
-    // Store original transcript in history, not the annotated version
+    // Update conversation history — keep last 4 messages (2 exchanges)
     gameState.conversationHistory.push({ role: 'user', content: transcript });
     if (data.speech) {
         gameState.conversationHistory.push({ role: 'assistant', content: data.speech });
     }
-    if (gameState.conversationHistory.length > 2) {
-        gameState.conversationHistory = gameState.conversationHistory.slice(-2);
+    if (gameState.conversationHistory.length > 4) {
+        gameState.conversationHistory = gameState.conversationHistory.slice(-4);
     }
 
+    // Execute actions from Claude
     if (data.actions && Array.isArray(data.actions)) {
         for (const action of data.actions) {
             executeAction(action);
         }
     }
 
+    // Update credits display
     if (data.remainingCredits !== null && data.remainingCredits !== undefined) {
         updateGameCreditsDisplay(data.remainingCredits);
     }
@@ -494,32 +253,6 @@ async function sendToGamemaster(transcript) {
         );
     }
 
-    // AUTO-ADVANCE: if round just ended (correct guess or answer revealed), start next round
-    const hadCorrectGuess = data.actions && data.actions.some(a => a.type === 'correct_guess');
-    const hadRevealAnswer = data.actions && data.actions.some(a => a.type === 'reveal_answer');
-    if ((hadCorrectGuess || hadRevealAnswer) && gameState.answerPool.length > 0) {
-        isProcessing = false;
-        // Wait for TTS to finish speaking, then brief pause, then next round
-        const waitForSpeech = () => {
-            if (AudioManager.isSpeaking) {
-                setTimeout(waitForSpeech, 500);
-            } else {
-                // Brief pause after speech ends so it doesn't feel rushed
-                setTimeout(() => sendToGamemaster('[Start next round]'), 1500);
-            }
-        };
-        // Start checking after a minimum delay
-        setTimeout(waitForSpeech, 1000);
-        return;
-    }
-
-    // Safety net: if category is set but Claude didn't generate a clue yet
-    if (gameState.category && !gameState.currentRound.answer && gameState.phase !== 'setup_intro') {
-        isProcessing = false;
-        setTimeout(() => sendToGamemaster('[Now generate the I Spy clue. Include a start_round action with letter, answer, hints, essay, proximity.]'), 1500);
-        return;
-    }
-
     isProcessing = false;
 
     // Process any queued input that arrived while we were busy
@@ -531,16 +264,12 @@ async function sendToGamemaster(transcript) {
 }
 
 // --- Execute structured actions from the Game Master ---
+// Claude is trusted. No guessValidated gate, no client-side validation.
 
 function executeAction(action) {
     if (!action || !action.type) return;
 
     switch (action.type) {
-        case 'set_phase':
-            gameState.phase = action.phase;
-            updatePhaseUI();
-            break;
-
         case 'register_player':
             // Avoid duplicates
             if (!gameState.players.find(p => p.name.toLowerCase() === action.name.toLowerCase())) {
@@ -556,52 +285,40 @@ function executeAction(action) {
         case 'set_category':
             gameState.category = action.category;
             updateCategoryDisplay();
-            // Pre-generate answer pool in background as soon as category is set
-            fetchAnswerPool();
             break;
 
         case 'set_difficulty':
             gameState.difficulty = action.difficulty;
-            // If category is already set, refresh the pool with correct difficulty
-            if (gameState.category && gameState.answerPool.length === 0) {
-                fetchAnswerPool();
-            }
             break;
 
         case 'start_round': {
-            // Server validates letter matching via tool use — this is a safety net only
+            // Server already validated letter match — this is a safety net only
             const letter = (action.letter || '').toUpperCase();
             const answer = (action.answer || '');
             if (answer && letter && answer[0].toUpperCase() !== letter) {
                 console.warn(`[Game] Letter mismatch slipped through: "${answer}" for "${letter}" — skipping`);
                 break;
             }
+            gameState.phase = 'playing';
             gameState.roundNumber++;
             gameState.currentRound = {
                 letter: letter,
                 answer: answer,
                 hints: action.hints || [],
                 hintsRevealed: 0,
-                proximity: action.proximity || 'region',
-                nearbyLocation: action.nearbyLocation || null,
-                essay: action.essay || null,
-                guessValidated: false
+                essay: action.essay || null
             };
             // Track this answer so we never repeat it
             if (answer && !gameState.previousAnswers.includes(answer)) {
                 gameState.previousAnswers.push(answer);
             }
             updateRoundDisplay();
+            updatePhaseUI();
             break;
         }
 
         case 'correct_guess': {
-            // Only award points if validateGuess() confirmed the answer in code.
-            // This prevents Claude from awarding points for wrong answers.
-            if (!gameState.currentRound.guessValidated) {
-                console.warn('[Game] correct_guess blocked — validateGuess did not confirm this answer');
-                break;
-            }
+            // Trust Claude's judgment — no guessValidated gate
             const player = gameState.players.find(p =>
                 p.name.toLowerCase() === (action.player || '').toLowerCase()
             );
@@ -624,7 +341,7 @@ function executeAction(action) {
         }
 
         case 'incorrect_guess':
-            // No state change needed — Professor Jones handles it verbally
+            // No state change — Professor Jones handles it verbally
             break;
 
         case 'reveal_hint':
@@ -632,7 +349,6 @@ function executeAction(action) {
                 gameState.currentRound.hintsRevealed = action.hintIndex + 1;
                 updateHintDisplay();
                 // Hint penalty: deduct 1 point from the player who asked
-                // (apply to last speaker, or spread across all if unclear)
                 if (action.player) {
                     const hintPlayer = gameState.players.find(p =>
                         p.name.toLowerCase() === action.player.toLowerCase()
@@ -646,21 +362,11 @@ function executeAction(action) {
             break;
 
         case 'reveal_answer':
-            // Show the answer in the UI
             showAnswer();
             break;
 
         case 'show_essay':
             showEssay(action.essay || gameState.currentRound.essay);
-            break;
-
-        case 'next_round':
-            // Clear round display, Professor Jones will start a new round
-            clearRoundDisplay();
-            break;
-
-        case 'reroll':
-            clearRoundDisplay();
             break;
 
         case 'end_game':
@@ -800,10 +506,10 @@ function escapeHtml(text) {
 // --- Game Lifecycle ---
 
 function startGame() {
-    // Ensure audio is ON — clear any stale muted state from previous sessions
+    // Ensure audio is ON
     if (AudioManager.muted) AudioManager.toggle();
 
-    // Unlock audio on mobile — must happen synchronously in the tap handler
+    // Unlock audio on mobile
     AudioManager.unlock();
 
     // Reset state
@@ -813,14 +519,10 @@ function startGame() {
     gameState.category = null;
     gameState.difficulty = null;
     gameState.currentRound = {
-        letter: null, answer: null, hints: [], hintsRevealed: 0,
-        proximity: null, nearbyLocation: null, essay: null,
-        guessValidated: false
+        letter: null, answer: null, hints: [], hintsRevealed: 0, essay: null
     };
     gameState.conversationHistory = [];
     gameState.previousAnswers = [];
-    gameState.answerPool = [];
-    gameState.poolLoading = false;
 
     // Start location tracking
     startLocationTracking();
@@ -844,7 +546,7 @@ function startGame() {
     const roundInfo = document.getElementById('round-info');
     if (roundInfo) roundInfo.classList.add('hidden');
 
-    // Show immediate loading feedback so the screen isn't blank
+    // Show immediate loading feedback
     addTranscriptEntry('jones', 'Professor Jones is joining the trip...', true);
 
     // Start voice command listening
@@ -915,7 +617,6 @@ function speak(text) {
 function showOutOfCredits() {
     const modal = document.getElementById('out-of-credits');
     if (modal) modal.classList.remove('hidden');
-    // Also show in transcript so user sees it even if modal is obscured
     removeThinkingIndicator();
     removeThinkingIndicator();
     addTranscriptEntry('jones', 'You\'re out of credits! Add more to keep playing.');
@@ -934,7 +635,7 @@ function updateGameCreditsDisplay(credits) {
 }
 
 function toggleMicForGuess() {
-    // If there's text in the input (e.g. from phone dictation), send it immediately
+    // If there's text in the input, send it immediately
     const textInput = document.getElementById('text-input');
     if (textInput && textInput.value.trim()) {
         const text = textInput.value.trim();
@@ -954,7 +655,6 @@ function toggleMicForGuess() {
 function toggleAudio() {
     const wasOn = !AudioManager.muted;
     AudioManager.toggle();
-    // If we just unmuted, restart speech recognition
     if (wasOn === false && !AudioManager.muted && AudioManager.hasSpeechRecognition) {
         AudioManager.startListening('command');
     }
@@ -1050,7 +750,8 @@ function updateLocationDisplay(text) {
     if (locationEl) locationEl.textContent = text;
 }
 
-// --- Voice Input Handler (trigger words + direct speech) ---
+// --- Voice Input Handler ---
+// Raw transcript goes straight to gamemaster. No preprocessing, no intent classification.
 
 const TRIGGER_WORDS = /^(send|go|play|start|begin|submit|okay|ok)$/i;
 
@@ -1059,7 +760,7 @@ function handleVoiceInput(transcript) {
 
     const trimmed = transcript.trim();
 
-    // RESET — emergency stop, back to beginning
+    // RESET — emergency stop
     if (/^reset$/i.test(trimmed)) {
         isProcessing = false;
         pendingTranscript = null;
@@ -1070,12 +771,11 @@ function handleVoiceInput(transcript) {
         return;
     }
 
-    // WAIT — stop talking, listen to the player
+    // WAIT — stop talking, listen
     if (/^wait$/i.test(trimmed)) {
         AudioManager.stopSpeaking();
         AudioManager.clearSilenceTimer();
         pendingTranscript = null;
-        // If still processing a previous request, let it finish but don't speak
         sendToGamemaster('[Player said WAIT. Stop immediately. Say something brief like "Sorry, go ahead" or "I\'m listening" and then WAIT for them to speak. Do NOT continue what you were saying. Do NOT offer hints or move the game forward. Just listen.]');
         return;
     }
@@ -1091,13 +791,11 @@ function handleVoiceInput(transcript) {
         }
     }
 
-    // Otherwise send the spoken words directly to the gamemaster
+    // Send raw transcript directly to gamemaster — Claude interprets everything
     sendToGamemaster(trimmed);
 }
 
 // --- Recognition Heartbeat ---
-// Ensures command mode stays alive on mobile where it tends to die silently.
-// Checks every 3 seconds: if the game is active and we should be listening but aren't, restart.
 
 let heartbeatInterval = null;
 
@@ -1113,7 +811,7 @@ function startHeartbeat() {
             console.log('[Heartbeat] Recognition died, restarting command mode');
             AudioManager.startListening('command');
         }
-    }, 5000); // Increased from 3s to 5s to reduce restart pressure
+    }, 5000);
 }
 
 function stopHeartbeat() {
@@ -1129,13 +827,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // AudioManager setup
     AudioManager.init();
 
-    // Voice callback: handle trigger words + direct speech + silence
+    // Voice callback: send raw transcript to gamemaster
     AudioManager.setCallbacks({
         guess: (transcript) => handleVoiceInput(transcript),
         command: (transcript) => handleVoiceInput(transcript),
         silence: () => {
-            // Player stayed silent after Professor Jones spoke — auto-continue
-            // Guard: don't fire if we're still processing, or if Jones is still speaking
+            // Player stayed silent after Professor Jones spoke — let Claude decide what to do
             if (!isProcessing && !AudioManager.isSpeaking) {
                 sendToGamemaster('[No response — player is silent]');
             }
