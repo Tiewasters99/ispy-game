@@ -323,8 +323,8 @@ export default async function handler(req, res) {
     res.setHeader('Cache-Control', 'no-cache');
 
     try {
-        // Call Claude with tools available
-        const response = await client.messages.create({
+        // --- STREAMING: extract speech as early as possible for TTS ---
+        const stream = await client.messages.stream({
             model: 'claude-sonnet-4-20250514',
             max_tokens: 1024,
             system: systemPrompt,
@@ -332,14 +332,45 @@ export default async function handler(req, res) {
             tools: TOOLS
         });
 
-        // Process the response — may contain text, tool_use, or both
+        let fullText = '';
+        let speechSent = false;
+        let currentBlockType = null; // 'text' or 'tool_use'
+
+        // Listen for text deltas — try to extract "speech" field incrementally
+        stream.on('text', (textDelta) => {
+            if (currentBlockType !== 'text') return;
+            fullText += textDelta;
+
+            // Try to extract speech early: look for "speech":"..." pattern
+            if (!speechSent) {
+                const speechMatch = fullText.match(/"speech"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+                if (speechMatch) {
+                    const earlySpeech = speechMatch[1]
+                        .replace(/\\"/g, '"')
+                        .replace(/\\n/g, ' ')
+                        .replace(/\\\\/g, '\\');
+                    if (earlySpeech.length > 5) {
+                        speechSent = true;
+                        res.write(JSON.stringify({ type: 'speech', speech: earlySpeech }) + '\n');
+                    }
+                }
+            }
+        });
+
+        stream.on('contentBlockStart', (block) => {
+            currentBlockType = block.type;
+        });
+
+        // Wait for the full response
+        const response = await stream.finalMessage();
+
+        // Process the complete response — text blocks + tool_use blocks
         let speech = '';
         let actions = [];
         let toolUseBlock = null;
 
         for (const block of response.content) {
             if (block.type === 'text') {
-                // Parse the JSON text response for speech and actions
                 let parsed = tryParseJSON(block.text);
                 if (parsed) {
                     if (parsed.speech) speech = parsed.speech;
@@ -358,7 +389,6 @@ export default async function handler(req, res) {
 
             // DETERMINISTIC VALIDATION: answer must start with the letter
             if (answer && letter && answer[0].toUpperCase() === letter) {
-                // Valid — convert to start_round action
                 actions.push({
                     type: 'start_round',
                     letter: letter,
@@ -369,12 +399,10 @@ export default async function handler(req, res) {
                     nearbyLocation: round.nearbyLocation || null
                 });
 
-                // Use speech from the tool call if main speech is empty
                 if (!speech && round.speech) {
                     speech = round.speech;
                 }
             } else {
-                // LETTER MISMATCH — retry with explicit correction
                 console.warn(`[Gamemaster] Letter mismatch: "${answer}" doesn't start with "${letter}". Retrying...`);
 
                 const retryResult = await retryRoundGeneration(client, letter, previousAnswers, gameState, locationContext);
@@ -392,7 +420,6 @@ export default async function handler(req, res) {
                         speech = retryResult.speech;
                     }
                 } else {
-                    // Retry also failed — try a different letter entirely
                     speech = speech || "Hmm, let me try a different letter.";
                     const usedLetters = previousAnswers.map(a => a[0]?.toUpperCase()).filter(Boolean);
                     const available = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').filter(l => !usedLetters.includes(l));
@@ -417,13 +444,12 @@ export default async function handler(req, res) {
             }
         }
 
-        // If no actions parsed, default to no_action
         if (actions.length === 0) {
             actions = [{ type: 'no_action' }];
         }
 
-        // Send speech early for TTS prefetch
-        if (speech) {
+        // Send speech now if streaming didn't catch it (tool_use responses, etc.)
+        if (speech && !speechSent) {
             res.write(JSON.stringify({ type: 'speech', speech }) + '\n');
         }
 
